@@ -983,6 +983,50 @@ func TestCustomCredentialHeader(t *testing.T) {
 	}
 }
 
+// BenchmarkToolCall measures one allowed tools/call end to end: agent HTTP
+// request, authentication, policy, two fsynced audit records, the upstream
+// round trip over HTTP, and the response.
+func BenchmarkToolCall(b *testing.B) {
+	e := newEnv(b)
+	args := map[string]any{"text": "hello"}
+	if r := e.call(bobKey, "fake.echo", args); r.status != 200 {
+		b.Fatal(r.raw)
+	}
+	for b.Loop() {
+		if r := e.call(bobKey, "fake.echo", args); r.status != 200 {
+			b.Fatal(r.raw)
+		}
+	}
+}
+
+// BenchmarkToolCallDenied measures a call refused by an argument constraint
+// (one audit record, no upstream round trip).
+func BenchmarkToolCallDenied(b *testing.B) {
+	e := newEnv(b, func(c *Config) { c.Agents[0].Limits = nil })
+	args := map[string]any{"path": "../../etc/passwd"}
+	for b.Loop() {
+		if r := e.call(aliceKey, "fake.read_file", args); r.errCode() != mcp.CodePolicyDenied {
+			b.Fatal(r.raw)
+		}
+	}
+}
+
+// BenchmarkToolCallParallel shows throughput with concurrent agents, where
+// group commit shares fsyncs between calls.
+func BenchmarkToolCallParallel(b *testing.B) {
+	e := newEnv(b)
+	args := map[string]any{"text": "hello"}
+	b.SetParallelism(4)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if r := e.call(bobKey, "fake.echo", args); r.status != 200 {
+				b.Error(r.raw)
+				return
+			}
+		}
+	})
+}
+
 // A call refused after its approval (here by the daily quota) must not use
 // the approval up.
 func TestApprovalNotWastedByLaterRefusal(t *testing.T) {
