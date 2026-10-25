@@ -1,0 +1,38 @@
+{
+  "public_url": "https://localhost:8443/_wicket",
+  "session": {"idle_timeout": "1h", "absolute_timeout": "8h"},
+  "providers": [
+    {
+      "id": "corp",
+      "type": "oidc",
+      "display_name": "Corporate SSO (OpenID Connect)",
+      "issuer": "https://localhost:9443",
+      "client_id": "wicket-demo",
+      "client_secret_env": "DEMO_CLIENT_SECRET",
+      "ca_file": "certs/ca.pem",
+      "userinfo": true,
+      "post_logout_redirect_url": "https://localhost:8443/_wicket/logged-out"
+    },
+    {
+      "id": "partner",
+      "type": "saml",
+      "display_name": "Partner (SAML)",
+      "idp_metadata_url": "https://localhost:9443/saml/metadata",
+      "ca_file": "certs/ca.pem",
+      "sp_key_file": "certs/sp-key.pem",
+      "sp_cert_file": "certs/sp.pem",
+      "sign_requests": true,
+      "email_attribute": "email",
+      "name_attribute": "displayName",
+      "groups_attribute": "groups"
+    }
+  ],
+  "apps": [
+    {
+      "id": "whoami",
+      "hosts": ["localhost:8443"],
+      "providers": ["corp", "partner"],
+      "allow": {"groups": ["eng"]}
+    }
+  ]
+}
