@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/crc32"
+	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -391,6 +395,199 @@ func TestChangesAndWatch(t *testing.T) {
 	}
 }
 
+func TestRecovery(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSchema(t, s)
+	write(t, s, OpTouch, "doc:a#viewer@user:x", "doc:a#owner@user:o")
+	write(t, s, OpDelete, "doc:a#viewer@user:x")
+	head := write(t, s, OpTouch, "doc:b#viewer@group:g#member")
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal("second close should be a no-op")
+	}
+	s2 := newStore(t, dir)
+	if s2.Head() != head || s2.MinRevision() != head {
+		t.Fatalf("head after recovery = %d (min %d), want %d", s2.Head(), s2.MinRevision(), head)
+	}
+	if sc, _ := s2.Schema(); sc == nil {
+		t.Fatal("schema lost")
+	}
+	rels, _, _ := s2.Read(head, Filter{ResourceType: "doc"}, "", 100)
+	got := []string{}
+	for _, r := range rels {
+		got = append(got, r.String())
+	}
+	if strings.Join(got, " ") != "doc:a#owner@user:o doc:b#viewer@group:g#member" {
+		t.Fatalf("recovered %v", got)
+	}
+	// Writes keep working after recovery, and survive another restart.
+	next := write(t, s2, OpTouch, "doc:c#viewer@user:q")
+	s2.Close()
+	s3 := newStore(t, dir)
+	if s3.Head() != next || len(direct(t, s3, next, "doc", "c", "viewer")) != 1 {
+		t.Fatal("write after recovery was lost")
+	}
+}
+
+func TestTornTailIsDropped(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(t, dir)
+	withSchema(t, s)
+	keep := write(t, s, OpTouch, "doc:a#viewer@user:x")
+	s.Close()
+	path := filepath.Join(dir, walName)
+	// Simulate a crash in the middle of appending the next record.
+	line, _ := encodeRecord(walRecord{Rev: keep + 1, Type: recWrite, Changes: []Change{{Revision: keep + 1, Op: OpTouch, Relationship: mustRel(t, "doc:a#viewer@user:y")}}})
+	appendBytes(t, path, line[:len(line)/2])
+	s2 := newStore(t, dir)
+	if s2.Head() != keep {
+		t.Fatalf("head = %d, want %d", s2.Head(), keep)
+	}
+	// A complete line with a bad checksum at the end is also a torn write.
+	s2.Close()
+	bad := append([]byte("00000000 "), line[9:]...)
+	appendBytes(t, path, bad)
+	s3 := newStore(t, dir)
+	if s3.Head() != keep {
+		t.Fatalf("head = %d after bad final record", s3.Head())
+	}
+}
+
+func TestCorruptionInTheMiddleIsFatal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, walName)
+	good, _ := encodeRecord(walRecord{Rev: 1, Type: recSchema, Schema: testSchema})
+	next, _ := encodeRecord(walRecord{Rev: 2, Type: recWrite, Changes: []Change{{Revision: 2, Op: OpTouch, Relationship: mustRel(t, "doc:a#viewer@user:x")}}})
+	corrupt := append([]byte(nil), good...)
+	corrupt[20] ^= 0xff
+	if err := os.WriteFile(path, append(corrupt, next...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(Options{Dir: dir}); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("open = %v, want ErrCorrupt", err)
+	}
+	// Revisions must increase.
+	again, _ := encodeRecord(walRecord{Rev: 1, Type: recWrite, Changes: []Change{{Revision: 1, Op: OpTouch, Relationship: mustRel(t, "doc:a#viewer@user:x")}}})
+	if err := os.WriteFile(path, append(append(append([]byte(nil), good...), again...), '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(Options{Dir: dir}); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("out-of-order revision: %v", err)
+	}
+	for _, rec := range []walRecord{{Rev: 1, Type: "mystery"}, {Rev: 1, Type: recSchema, Schema: "definition {"}, {Rev: 1, Type: recCheckpoint, Schema: "nope"}} {
+		line, _ := encodeRecord(rec)
+		if err := os.WriteFile(path, append(line, next...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Open(Options{Dir: dir}); !errors.Is(err, ErrCorrupt) {
+			t.Fatalf("record %+v: %v", rec, err)
+		}
+	}
+	if _, err := decodeRecord([]byte("zzzzzzzz {}")); err == nil {
+		t.Fatal("bad checksum hex accepted")
+	}
+	if _, err := decodeRecord([]byte("short")); err == nil {
+		t.Fatal("short record accepted")
+	}
+	payload := []byte("not json")
+	sumLine := append([]byte(fmt.Sprintf("%08x ", crcOf(payload))), payload...)
+	if _, err := decodeRecord(sumLine); err == nil {
+		t.Fatal("non-JSON payload accepted")
+	}
+}
+
+func TestBrokenLogRefusesWrites(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(t, dir)
+	withSchema(t, s)
+	s.wal.f.Close() // make every following write fail at the OS level
+	if _, err := s.Write([]Update{{Op: OpTouch, Relationship: mustRel(t, "doc:a#viewer@user:x")}}, nil); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("write on a closed log: %v", err)
+	}
+	if s.Head() != 1 {
+		t.Fatal("failed write advanced the head")
+	}
+	if _, err := s.WriteSchema(testSchema); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("schema write on a broken log: %v", err)
+	}
+}
+
+func TestOpenErrors(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(Options{Dir: filepath.Join(file, "sub")}); err == nil {
+		t.Fatal("opening under a file should fail")
+	}
+}
+
+// TestCrashAtEveryByte truncates the log at every possible length and checks
+// that recovery always yields exactly the state after some prefix of the
+// acknowledged writes.
+func TestCrashAtEveryByte(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(t, dir)
+	withSchema(t, s)
+	rng := rand.New(rand.NewSource(1))
+	type snap struct {
+		rev  Revision
+		rels string
+	}
+	states := []snap{{s.Head(), ""}}
+	for i := 0; i < 8; i++ {
+		var ups []Update
+		for j := 0; j < 1+rng.Intn(3); j++ {
+			op := OpTouch
+			if rng.Intn(3) == 0 {
+				op = OpDelete
+			}
+			ups = append(ups, Update{Op: op, Relationship: mustRel(t, fmt.Sprintf("doc:d%d#viewer@user:u%d", rng.Intn(3), j))})
+		}
+		if _, err := s.Write(ups, nil); err != nil {
+			t.Fatal(err)
+		}
+		states = append(states, snap{s.Head(), dump(t, s)})
+	}
+	s.Close()
+	full, err := os.ReadFile(filepath.Join(dir, walName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRev := map[Revision]string{}
+	for _, st := range states {
+		byRev[st.rev] = st.rels
+	}
+	step := 1
+	if testing.Short() {
+		step = 13 // still crosses every record boundary region; the full run tries every byte
+	}
+	for n := 0; n <= len(full); n += step {
+		d := t.TempDir()
+		if err := os.WriteFile(filepath.Join(d, walName), full[:n], 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r, err := Open(Options{Dir: d})
+		if err != nil {
+			t.Fatalf("truncated at %d: %v", n, err)
+		}
+		want, ok := byRev[r.Head()]
+		if r.Head() == 0 {
+			want, ok = "", true
+		}
+		if !ok || dump(t, r) != want {
+			t.Fatalf("truncated at %d: recovered rev %d with %q", n, r.Head(), dump(t, r))
+		}
+		r.Close()
+	}
+}
+
 func dump(t testing.TB, s *Store) string {
 	if sc, _ := s.Schema(); sc == nil {
 		return ""
@@ -404,4 +601,18 @@ func dump(t testing.TB, s *Store) string {
 		b.WriteString(r.String() + ";")
 	}
 	return b.String()
+}
+
+func crcOf(b []byte) uint32 { return crc32.Checksum(b, crcTable) }
+
+func appendBytes(t testing.TB, path string, b []byte) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.Write(b); err != nil {
+		t.Fatal(err)
+	}
 }
