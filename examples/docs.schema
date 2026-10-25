@@ -1,0 +1,21 @@
+// Document sharing: users, nested groups, folders with inheritance, bans.
+definition user {}
+
+definition group {
+  relation member: user | group#member
+}
+
+definition folder {
+  relation parent: folder
+  relation viewer: user | user:* | group#member
+  permission view = viewer + parent->view
+}
+
+definition doc {
+  relation parent: folder
+  relation owner: user
+  relation editor: user | group#member
+  relation banned: user
+  permission edit = owner + editor
+  permission view = (edit + parent->view) - banned
+}
