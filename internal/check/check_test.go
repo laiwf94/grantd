@@ -292,6 +292,65 @@ func TestCacheEviction(t *testing.T) {
 	}
 }
 
+func TestLookupResources(t *testing.T) {
+	var rels []string
+	for i := 0; i < 30; i++ {
+		rels = append(rels, fmt.Sprintf("doc:d%02d#viewer@user:u%d", i, i%3))
+	}
+	rels = append(rels, "doc:d05#banned@user:u2")
+	f := newFixture(t, nil, rels...)
+	sc, _ := f.st.Schema()
+	var got []string
+	cursor := ""
+	for {
+		res, err := f.eng.LookupResources(context.Background(), sc, f.st, f.st.Head(), "doc", "view", store.Subject{Type: "user", ID: "u2"}, cursor, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, res.IDs...)
+		if res.Next == "" {
+			break
+		}
+		cursor = res.Next
+	}
+	want := "d02,d08,d11,d14,d17,d20,d23,d26,d29" // every third, minus banned d05
+	if strings.Join(got, ",") != want {
+		t.Fatalf("lookup = %v, want %s", got, want)
+	}
+	if _, err := f.eng.LookupResources(context.Background(), sc, f.st, f.st.Head(), "doc", "nope", store.Subject{Type: "user", ID: "u2"}, "", 0); !errors.Is(err, ErrUnknownName) {
+		t.Fatalf("bad permission: %v", err)
+	}
+	res, _ := f.eng.LookupResources(context.Background(), sc, f.st, f.st.Head(), "doc", "view", store.Subject{Type: "user", ID: "u0"}, "", 10_000)
+	if len(res.IDs) != 10 || res.Next != "" {
+		t.Fatalf("large limit: %v %q", res.IDs, res.Next)
+	}
+}
+
+func TestLookupEvaluationCap(t *testing.T) {
+	f := newFixture(t, nil)
+	for b := 0; b < 11; b++ {
+		var batch []string
+		for i := 0; i < 1000; i++ {
+			batch = append(batch, fmt.Sprintf("doc:b%02d_%04d#viewer@user:x", b, i))
+		}
+		f.write(batch...)
+	}
+	sc, _ := f.st.Schema()
+	res, err := f.eng.LookupResources(context.Background(), sc, f.st, f.st.Head(), "doc", "view", store.Subject{Type: "user", ID: "nobody"}, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.IDs) != 0 || res.Next == "" {
+		t.Fatalf("cap did not page: %v %q", res.IDs, res.Next)
+	}
+	res2, _ := f.eng.LookupResources(context.Background(), sc, f.st, f.st.Head(), "doc", "view", store.Subject{Type: "user", ID: "nobody"}, res.Next, 10)
+	if res2.Next != "" {
+		t.Fatalf("second page should finish the scan, got cursor %q", res2.Next)
+	}
+}
+
+// ---- property test against an independent reference evaluator --------------
+
 func TestOldSnapshotAfterSchemaChange(t *testing.T) {
 	f := newFixture(t, nil, "group:eng#member@user:a", "doc:d#viewer@group:eng#member")
 	old := f.st.Head()
