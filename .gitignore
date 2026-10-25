@@ -1,0 +1,6 @@
+/wicket
+/fakeidp
+/whoami
+*.out
+*.test
+/data/
