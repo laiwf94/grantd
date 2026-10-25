@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/laiwf94/grantd/internal/schema"
 	"github.com/laiwf94/grantd/internal/store"
 )
 
@@ -350,8 +351,6 @@ func TestLookupEvaluationCap(t *testing.T) {
 	}
 }
 
-// ---- property test against an independent reference evaluator --------------
-
 type world struct {
 	groupMember  map[string][]string // group -> users
 	groupNested  map[string][]string // group -> groups whose members are members
@@ -597,7 +596,49 @@ func TestMatchesReferenceOnRandomGraphs(t *testing.T) {
 	}
 }
 
-// ---- benchmarks ------------------------------------------------------------
+func benchFixture(b *testing.B, depth, width int, cache *Cache) (*fixture, Request, *schema.Schema) {
+	var rels []string
+	for d := 0; d < depth; d++ {
+		rels = append(rels, fmt.Sprintf("folder:f%d#parent@folder:f%d", d, d+1))
+		for w := 0; w < width; w++ {
+			rels = append(rels, fmt.Sprintf("folder:f%d#viewer@user:noise%d_%d", d, d, w))
+		}
+	}
+	rels = append(rels, fmt.Sprintf("folder:f%d#viewer@group:g#member", depth), "group:g#member@user:target", "doc:x#parent@folder:f0")
+	f := newFixture(b, cache, rels...)
+	sc, _ := f.st.Schema()
+	return f, Request{"doc", "x", "view", store.Subject{Type: "user", ID: "target"}}, sc
+}
+
+func BenchmarkCheckDeepFolders(b *testing.B) {
+	for _, depth := range []int{1, 10, 40} {
+		b.Run(fmt.Sprintf("depth=%d", depth), func(b *testing.B) {
+			f, q, sc := benchFixture(b, depth, 20, nil)
+			rev := f.st.Head()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if ok, _, err := f.eng.Check(context.Background(), sc, rev, q); err != nil || !ok {
+					b.Fatal(ok, err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkCheckCached(b *testing.B) {
+	f, q, sc := benchFixture(b, 40, 20, NewCache(100_000))
+	rev := f.st.Head()
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if ok, _, err := f.eng.Check(context.Background(), sc, rev, q); err != nil || !ok {
+				b.Fatal(ok, err)
+			}
+		}
+	})
+}
 
 func TestOldSnapshotAfterSchemaChange(t *testing.T) {
 	f := newFixture(t, nil, "group:eng#member@user:a", "doc:d#viewer@group:eng#member")
