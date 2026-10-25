@@ -53,59 +53,71 @@ misuse (ASI02). The model cannot be relied on to refuse, so the controls have
 to sit outside it, on the path every call takes: least privilege per agent,
 complete mediation, a human for the risky calls, and a record of everything.
 
-## What it does
+## How a call is handled
 
-- **Agent identity**: static keys (only their SHA-256 is stored, compared in
-  constant time) or short-lived signed tokens (HS256 JWS with `iss`, `aud`,
-  `exp`, `nbf`, `iat`, a lifetime cap and key rotation by `kid`). Each identity
-  has an agent id, an owner and scopes.
-- **Policy**: an ordered JSON rule list. Default deny; an explicit deny beats
-  any allow. Rules match agents or scopes, upstreams and tools (exact or
-  `prefix_*`), and constrain arguments with a closed JSON Schema subset:
-  `type`, `enum`, `pattern` (RE2), `minimum`/`maximum`,
-  `minLength`/`maxLength`, `required`, `additionalProperties: false`, `items`,
-  plus `x-path-prefix` for canonical file paths and `x-allowed-hosts` for
-  URLs (allow rules only, so odd input fails closed). Unknown keywords are
-  errors. Every decision names the rule that made it. The file is
-  hot-reloaded atomically; an invalid file is rejected and the old policy stays.
-- **Human approval**: rules marked `requires_approval` park the call. An
-  administrator approves or denies it on a separate admin API. A grant is bound
-  to the agent, the tool and the SHA-256 of the exact arguments, is single use
-  and expires. The agent's request waits up to a configured time, or gets a
-  "pending" error and retries the same call.
-- **Rate limits and quotas**: token buckets (GCRA) per agent and per
-  agent+tool, a daily call quota per agent, and a concurrency limit per
-  upstream. Refusals are HTTP 429 with `Retry-After` (200 with `Retry-After`
-  for clients in a 2025 session).
-- **Upstream proxying**: agents see only the tools they may call, named
-  `upstream.tool`. Calls are forwarded with a timeout, a response size limit
-  and the upstream's credential added by the gateway; agent credentials are
-  never forwarded and upstream URLs come only from configuration. Redirects are
-  not followed.
-- **Rug-pull detection**: each tool definition (name, title, description,
-  schemas, annotations) is pinned by hash on first sight and persisted. A
-  changed definition is quarantined, hidden and refused, until an administrator
-  approves the new hash.
-- **Output guarding**: per-rule redaction of credential shapes (AWS keys,
-  GitHub and Slack tokens, private keys, bearer tokens, JWTs, custom RE2) and
-  truncation to a byte budget, recorded in the audit log.
-- **Tamper-evident audit log**: append-only JSONL, each record carrying the
-  SHA-256 of the previous line, fsynced before the call proceeds (with group
-  commit). `toolgate audit verify` finds any edit, deletion or reordering and
-  names the line. Arguments are stored as an HMAC plus a redacted preview,
-  never raw. If the log cannot be written, calls are refused.
-- **Both MCP eras**: the current revision (2026-07-28: stateless, `_meta`
-  and header checks, `server/discover`) and the handshake revisions
-  (2025-11-25, 2025-06-18, 2025-03-26: `initialize`, `Mcp-Session-Id` bound to
-  the agent, `DELETE`), on one endpoint, as both server and client. One
-  JSON-RPC message per request (batches are refused, as the protocol requires
-  since 2025-06-18), `Origin` validation against DNS rebinding, body limits,
-  duplicate-key rejection, `x-mcp-header` mirroring and checks.
+Each of the steps below can refuse a call, and a refusal ends it there. The
+exact order is in the [design notes](docs/DESIGN.md#the-path-of-one-call).
 
-## Quick start
+Every agent has an identity: a static key (only its SHA-256 is stored, and it
+is compared in constant time) or a short-lived signed token (HS256 JWS with
+`iss`, `aud`, `exp`, `nbf`, `iat`, a lifetime cap and key rotation by `kid`).
+An identity carries an agent id, an owner and scopes.
+
+The policy is an ordered JSON rule list. Nothing is allowed unless a rule says
+so, and an explicit deny beats any allow. Rules match agents or scopes,
+upstreams and tools (exact or `prefix_*`), and constrain arguments with a
+closed JSON Schema subset: `type`, `enum`, `pattern` (RE2),
+`minimum`/`maximum`, `minLength`/`maxLength`, `required`,
+`additionalProperties: false` and `items`, plus `x-path-prefix` for canonical
+file paths and `x-allowed-hosts` for URLs. Those two are accepted in allow
+rules only, so odd input fails closed. Unknown keywords are errors, every
+decision names the rule that made it, and the file is hot-reloaded
+atomically; an invalid file is rejected and the old policy keeps running.
+
+Rules marked `requires_approval` park the call until an administrator approves
+or denies it on a separate admin API. A grant is bound to the agent, the tool
+and the SHA-256 of the exact arguments, works once and expires. The agent's
+request either waits for a configured time or gets a "pending" error and
+retries the same call.
+
+Calls are rate limited with token buckets (GCRA) per agent and per agent and
+tool, a daily quota per agent, and a concurrency limit per upstream. Refusals
+are HTTP 429 with `Retry-After` (200 with `Retry-After` for clients in a 2025
+session).
+
+Agents only see the tools they may call, named `upstream.tool`. The gateway
+forwards calls with a timeout and a response size limit and adds the
+upstream's own credential; agent credentials are never forwarded, upstream
+URLs come only from configuration, and redirects are not followed. Each tool
+definition (name, title, description, schemas, annotations) is pinned by hash
+the first time it is seen. If an upstream later changes it, the tool is
+quarantined, hidden and refused until an administrator approves the new hash.
+
+Results can be redacted per rule for credential shapes (AWS keys, GitHub and
+Slack tokens, private keys, bearer tokens, JWTs, or custom RE2) and truncated
+to a byte budget, and the audit log records when that happened.
+
+The audit log is append-only JSONL. Each record carries the SHA-256 of the
+previous line and is fsynced before the call goes ahead (concurrent calls
+share an fsync). `toolgate audit verify` finds any edit, deletion or
+reordering and names the line. Arguments are stored as an HMAC plus a redacted
+preview, never raw, and if the log can't be written the call is refused.
+
+toolgate speaks the current MCP revision (2026-07-28: stateless, `_meta` and
+header checks, `server/discover`) and the handshake revisions (2025-11-25,
+2025-06-18, 2025-03-26: `initialize`, `Mcp-Session-Id` bound to the agent,
+`DELETE`) on one endpoint, as both server and client. It takes one JSON-RPC
+message per request (batches are refused, as the protocol has required since
+2025-06-18), validates `Origin` against DNS rebinding, limits bodies, rejects
+duplicate keys, and mirrors and checks `x-mcp-header`.
+
+## Trying it
+
+The demo script builds both binaries, starts them and runs every scenario
+shown above:
 
 ```console
-$ ./examples/demo.sh        # builds both binaries, starts them, runs every scenario above
+$ ./examples/demo.sh
 ```
 
 To run the pieces yourself:
@@ -127,9 +139,10 @@ Then point any MCP client at `http://127.0.0.1:8080/mcp` with
 [examples/config.json](examples/config.json) and
 [examples/policy.json](examples/policy.json).
 
-With Docker. The image holds both binaries, runs as `nonroot` on distroless,
-and keeps the audit log and tool pins in `/data`. Here the fake upstream runs
-as a second container; the config must name it (`http://mcpfake:19100/mcp`):
+The Docker image holds both binaries, runs as `nonroot` on distroless, and
+keeps the audit log and tool pins in `/data`. In this example the fake
+upstream runs as a second container, so the config must name it
+(`http://mcpfake:19100/mcp`):
 
 ```console
 $ docker build -t toolgate .
@@ -181,9 +194,9 @@ HTTP 200, as those revisions expect, and still get `Retry-After`.
 Admin errors look like
 `{"error":{"code":"not_found","message":"...","request_id":"..."}}`.
 
-## How it is tested
+## Tests and benchmarks
 
-| What | How |
+| Area | Test |
 |---|---|
 | Policy decisions | Random policies (wildcards, scopes, deny rules with and without argument schemas, path prefixes) and random calls are checked against an independent, naive reference evaluator, for both `Evaluate` and the `tools/list` filter. Breaking the engine on purpose (ignoring scopes, dropping `*` upstream rules from the index, ignoring deny-rule schemas, hiding tools on conditional denies) makes it fail. |
 | Rate limiting | Random schedules against an exact integer token-bucket reference; the GCRA limiter must admit exactly the same calls. |
@@ -198,11 +211,10 @@ $ go test -race ./...                  # full suite, 96% statement coverage
 $ go test -run=^$ -bench=. ./internal/...
 ```
 
-## Performance
-
-Apple M4 Max. Durability dominates: macOS `fsync` (`F_FULLFSYNC`) took 4 to
-7 ms across runs, and an allowed call writes two fsynced audit records before
-it returns. Ranges are over several runs; the in-memory steps are stable.
+The benchmark figures below are from an Apple M4 Max. Durability dominates:
+macOS `fsync` (`F_FULLFSYNC`) took 4 to 7 ms across runs, and an allowed call
+writes two fsynced audit records before it returns. Ranges are over several
+runs; the in-memory steps are stable.
 
 | Operation | Time |
 |---|---|
@@ -217,14 +229,12 @@ it returns. Ranges are over several runs; the in-memory steps are stable.
 | `tools/call` end to end, 64 concurrent callers | 0.8 to 1.2 ms per call |
 | Denied `tools/call` end to end (one audit record) | 4.2 to 8.7 ms |
 
-## Design
+## Repository map
 
-[docs/DESIGN.md](docs/DESIGN.md) covers the threat model, the order of checks,
-the policy semantics, approvals, rug-pull detection, the audit log format, how
-both MCP protocol eras are served, failure modes, limits and what would change
-to run it as a fleet.
-
-## Layout
+The design notes in [docs/DESIGN.md](docs/DESIGN.md) cover the threat model,
+the order of checks, the policy semantics, approvals, rug-pull detection, the
+audit log format, how both MCP protocol eras are served, failure modes, limits
+and what would change to run it as a fleet. The code is organised like this:
 
 ```text
 cmd/toolgate         gateway entry point, `audit verify` and `token` subcommands

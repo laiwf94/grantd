@@ -1,29 +1,30 @@
 # toolgate design
 
-## Goals
+Every tool call an agent makes should pass one enforcement point that
+authenticates it, checks it against policy, limits it and records it, with no
+path around it: Saltzer and Schroeder's complete mediation and fail-safe
+defaults [1]. When a check cannot be made, because the policy is invalid, the
+audit log is unwritable or a tool pin could not be saved, the call is refused
+rather than waved through.
 
-1. **Complete mediation.** Every tool call an agent makes passes one
-   enforcement point that authenticates it, authorizes it against policy,
-   limits it and records it. There is no path to a tool that skips a check
-   (Saltzer and Schroeder's "complete mediation" and "fail-safe defaults" [1]).
-2. **Least privilege per agent.** An agent sees and can call only what its
-   policy grants, with arguments constrained to what the task needs. This is
-   the mitigation OWASP gives for Excessive Agency [3]: minimize the
-   functionality, permissions and autonomy an agent has. OWASP's agentic list
-   calls the same failure tool misuse [4].
-3. **A human for the risky calls**, bound to exactly what they approved.
-4. **Evidence.** A record of every decision that an operator, or an auditor
-   who does not trust the operator's disk, can verify.
-5. **Fail closed.** When a check cannot be made (invalid policy, unwritable
-   audit log, unsaved tool pin), the call is refused, not waved through.
-6. **Speak MCP correctly**, so any conforming client and server work through
-   the gateway unchanged.
+Each agent should see and be able to call only what its policy grants, with
+arguments narrowed to what the task needs. That is the mitigation OWASP gives
+for Excessive Agency [3] (cut an agent's functionality, permissions and
+autonomy), and its agentic list calls the same failure tool misuse [4]. For
+the calls that are risky anyway, a human decides, and the decision covers
+exactly the call they saw.
 
-Non-goals: detecting prompt injection in content (no classifier can promise
-that; the gateway limits what an injected agent can do instead), relaying
-interactive requests from upstreams (sampling, elicitation), resources and
-prompts, and running as a replicated fleet. The last is discussed under
-[Scaling out](#scaling-out).
+There should be evidence afterwards: a record of every decision that an
+operator, or an auditor who does not trust the operator's disk, can verify.
+And the gateway has to speak MCP correctly, so that any conforming client and
+server work through it unchanged.
+
+Some things are left out on purpose. The gateway does not try to detect
+prompt injection in content (no classifier can promise that; it limits what an
+injected agent can do instead). It does not relay interactive requests from
+upstreams (sampling, elicitation), resources or prompts, and it does not run
+as a replicated fleet. The last is discussed under
+[Going wider than one process](#going-wider-than-one-process).
 
 ## Threat model
 
@@ -41,7 +42,7 @@ prompts, and running as a replicated fleet. The last is discussed under
 | Covering tracks | Editing or deleting audit lines | Hash-chained log, head hash exported for external anchoring |
 | Parser differentials | Duplicate JSON keys, odd URLs read differently by gateway and upstream | Duplicate keys rejected; validated arguments are re-encoded and forwarded, not the raw bytes; non-canonical paths and ambiguous URLs refused |
 
-## Order of checks
+## The path of one call
 
 Each `tools/call` runs these steps in order. Any refusal returns at once and
 is audited with the rule or reason that caused it.
@@ -53,20 +54,17 @@ authenticate ─▶ agent rate ─▶ tool exists & trusted ─▶ Mcp-Param hea
    ─▶ redact / truncate ─▶ audit "completed" (fsync) ─▶ reply
 ```
 
-The order matters in three places:
+The order matters in three places. Policy runs before rate limits and quota,
+so a denied call costs the agent nothing and cannot drain another tool's
+bucket; the per-agent request rate, checked at authentication, still bounds
+how fast an agent can probe. Quota is taken after approval, so waiting for a
+human does not burn it, and it is refunded if the call is refused before
+reaching the upstream (audit failure, upstream busy). And the "started"
+record is durable before the upstream is contacted, so a crash after that
+point still leaves evidence that the call may have run. If that record
+cannot be written, the call is refused with 503 and `/healthz` reports 503.
 
-- Policy runs before rate limits and quota, so denied calls cost the agent
-  nothing and cannot be used to exhaust another tool's bucket; the per-agent
-  request rate, checked at authentication, still bounds how fast an agent can
-  probe.
-- Quota is taken after approval, so waiting for a human does not burn quota,
-  and is refunded when the call is refused before reaching the upstream
-  (audit failure, upstream busy).
-- The "started" record is durable before the upstream is contacted. A crash
-  after that point leaves evidence that a call may have run. If the record
-  cannot be written, the call is refused (HTTP 503) and `/healthz` reports 503.
-
-## Data model
+## What is stored, and where
 
 Almost nothing is a database. The configuration (agents, upstreams, limits)
 is read once at start. The policy is a file, recompiled on change. Two files
@@ -98,7 +96,7 @@ may contain dots themselves (`admin.tools.list` on upstream `ops` is
 ]}
 ```
 
-**Semantics.** Default deny, and deny overrides allow, which is XACML's
+Evaluation is default deny, and deny overrides allow, which is XACML's
 "deny-overrides" combining algorithm [6]:
 
 1. If any deny rule matches (subject, upstream, tool, and its argument schema
@@ -124,13 +122,13 @@ where unusual input fails closed. Deny rules suit textual patterns, and
 `x-path-prefix` makes those reliable by refusing paths with `..`, `.`,
 repeated or trailing slashes before any rule sees them.
 
-**Listing.** `tools/list` shows a tool when some allow rule could permit a
+`tools/list` shows a tool when some allow rule could permit a
 call to it and no unconditional deny forbids every call. A call to a tool the
 agent cannot see is answered "Unknown tool", the same as a tool that does not
 exist, so policy does not reveal what else is behind the gateway. The decision
 is still audited as `default-deny`.
 
-**Argument schemas** are a closed subset of JSON Schema 2020-12. Unsupported
+Argument schemas are a closed subset of JSON Schema 2020-12. Unsupported
 keywords are compile errors rather than being ignored, because an ignored
 `maxLenght` typo is an allow-everything rule. `pattern` uses Go's RE2 engine,
 which runs in linear time, so a policy author cannot write a catastrophic
@@ -154,9 +152,10 @@ Two keywords cover the most common tool argument risks:
   backslashes, spaces, non-ASCII or other bytes that URL parsers disagree about
   are refused, the class of bug Orange Tsai's SSRF research showed [7]. The
   check is on names: an allowed name that resolves to a private address is the
-  upstream's concern (see Scaling out for an egress proxy).
+  upstream's concern (see [Going wider than one process](#going-wider-than-one-process)
+  for an egress proxy).
 
-**Hot reload.** The policy file is re-read every 2 s by default and applied
+The policy file is re-read every 2 s by default and applied
 when its contents change (comparing a hash of the bytes, not size and mtime,
 which miss a same-size edit within one mtime tick), and on `SIGHUP` and
 `POST /admin/policy/reload`. A new policy is
@@ -167,14 +166,14 @@ in force, and the rejection is audited once; the next good write is picked up.
 Replacing the file by rename avoids the noise. Every audit record carries the hash of
 the policy that decided it.
 
-**Evaluation cost.** Rules are indexed by upstream at compile time (rules
+Rules are indexed by upstream at compile time (rules
 naming `"*"` are merged into each upstream's list in file order), so a
 decision scans only rules that can apply. A 200-rule policy decides in about
 0.3 µs plus argument validation.
 
 ## Identity
 
-**Static keys** are random strings (`toolgate token new` makes one with 260
+Static keys are random strings (`toolgate token new` makes one with 260
 bits of entropy). The configuration stores only their SHA-256, so the config
 file is not a secret. Authentication hashes the presented key and compares it
 with every configured hash using `subtle.ConstantTimeCompare` and
@@ -182,7 +181,7 @@ with every configured hash using `subtle.ConstantTimeCompare` and
 much of a key was right. A fast hash is enough here because the keys are
 high-entropy; passwords would need a slow one.
 
-**Signed tokens** are compact JWS (RFC 7515) with HMAC-SHA256 and JWT claims
+Signed tokens are compact JWS (RFC 7515) with HMAC-SHA256 and JWT claims
 (RFC 7519) [14]: `iss`, `aud`, `sub` (agent id), `owner`, `scope`, `iat`, `nbf`,
 `exp`, `jti`. Following RFC 8725, the algorithm is fixed: a header naming any
 `alg` other than `HS256` is refused, so `none` and algorithm confusion are not
@@ -223,7 +222,7 @@ from any agent's, so an agent cannot approve itself. Open requests are bounded
 (16 per agent, 1024 in total) and kept in memory only; after a restart an
 agent asks again.
 
-## Rug-pull detection
+## Pinning tool definitions
 
 A tool's definition is everything the model reads about it: name, title,
 description, input and output schema, annotations. The gateway drops icons and
@@ -277,7 +276,7 @@ startup log prints it), and `audit verify -head <hash>` checks against it.
 Shipping heads to a separate system periodically (or to a transparency log) is
 the production answer.
 
-**Durability.** A record is written with one `write` and fsynced before
+A record is written with one `write` and fsynced before
 `Append` returns. Concurrent appends share fsyncs: whoever acquires the sync
 lock fsyncs everything written so far, covering every caller queued behind it
 (group commit). On macOS (`F_FULLFSYNC`, 4 to 7 ms per call on the test
@@ -292,7 +291,7 @@ On start the whole log is verified. A torn final line (a write that was never
 acknowledged) is cut off; any other damage stops startup with the line number.
 The tests cut a log at every byte offset and flip every single byte.
 
-**What is recorded about arguments.** Never the raw values. `args_hmac` is an
+Raw argument values are never recorded. `args_hmac` is an
 HMAC-SHA256 under `TOOLGATE_AUDIT_KEY`, so the same arguments can be
 correlated across records but a short secret cannot be recovered by hashing
 guesses (which an unkeyed SHA-256 would allow). `args_preview` is at most 256
@@ -301,8 +300,8 @@ characters, with values under sensitive-looking keys (`password`, `token`,
 
 ## Serving MCP
 
-The gateway targets the current revision, **2026-07-28** [2], and also serves the
-handshake-based revisions **2025-11-25**, **2025-06-18** and **2025-03-26**,
+The gateway targets the current revision, 2026-07-28 [2], and also serves the
+handshake-based revisions 2025-11-25, 2025-06-18 and 2025-03-26,
 which the specification calls a "dual-era" server. Most deployed clients and
 servers still speak the older revisions, so a gateway that only spoke the new
 one would break them.
@@ -338,7 +337,7 @@ responses (the gateway sends no requests); `Origin`, when present, must be in
 nesting is capped at 64; invalid UTF-8 and duplicate object keys are parse
 errors. GET is 405, since the gateway offers no standalone stream.
 
-**As a client** to upstreams the gateway speaks 2026-07-28 first. An HTTP 400,
+As a client to upstreams, the gateway speaks 2026-07-28 first. An HTTP 400,
 404 or 405 without a recognized modern error means a legacy server: it runs
 `initialize`, keeps the session, and re-initializes once when the server says
 the session is gone. Responses may be JSON or SSE; SSE streams are parsed up to
@@ -347,7 +346,7 @@ client capabilities, so a conforming upstream will not return
 `input_required`; if one does anyway, the call fails rather than relaying an
 interactive request the agent never agreed to.
 
-## Failure modes
+## Failures and what toolgate does
 
 | Failure | Behavior |
 |---|---|
@@ -382,52 +381,55 @@ interactive request the agent never agreed to.
 | Argument preview | 256 characters | Enough to read, too short to leak much |
 | HTTP | 5 s header read, 15 s body read, 6 min write, 32 KiB headers | Slow-client protection; the write timeout covers the worst case for one call (list refresh, approval wait, slot wait and upstream call at their maximums) |
 
-## Security notes
+## Secrets, listeners and the image
 
-- Admin and agent APIs listen on separate addresses, both on loopback by
-  default. The admin API always requires its own token (32+ characters),
-  compared in constant time; agent credentials are useless there.
-- No secret reaches a log: tokens are never logged, upstream credentials come
-  from environment variables named in the config, error messages name the
-  variable rather than its value, and internal errors return a request id with
-  the details only in the server log.
-- Upstream error messages are passed to agents only cut to 200 bytes and
-  through the rule's redaction patterns as well as the built-in ones.
-- The HTTP transport for upstreams ignores proxy environment variables, so
-  traffic cannot be rerouted by the environment.
-- Request ids in logs and audit records are always generated by the
-  gateway. A client's `X-Request-Id` is logged separately, and only if it
-  matches `^[A-Za-z0-9._:-]{1,128}$`, so an agent cannot choose or reuse the
-  id that ties its audit records together.
-- The container image is distroless, runs as `nonroot`, and has no shell.
+The admin and agent APIs listen on separate addresses, both loopback by
+default. The admin API always wants its own token of 32 or more characters,
+compared in constant time, and agent credentials are useless there.
 
-## Scaling out
+Secrets stay out of logs. Tokens are never logged; upstream credentials come
+from environment variables named in the config, and errors name the variable,
+not its value; internal errors return a request id to the caller and keep the
+details in the server log. Upstream error messages reach agents cut to 200
+bytes and passed through the rule's redaction patterns and the built-in ones.
 
-What would change to run this for many agents across machines:
+The HTTP transport for upstreams ignores proxy environment variables, so the
+environment cannot reroute that traffic. Request ids in logs and audit
+records are always generated by the gateway; a client's `X-Request-Id` is
+logged in a separate field, and only if it matches `^[A-Za-z0-9._:-]{1,128}$`,
+so an agent cannot pick or reuse the id that ties its audit records together.
+The container image is distroless, runs as `nonroot` and has no shell.
 
-1. **Shared counters.** Buckets and quotas live in each gateway's memory, so
-   N replicas allow N times the rate. GCRA [13] needs only one timestamp per key,
-   which maps directly onto an atomic compare-and-set in Redis or a similar
-   store (the approach of redis-cell [11]); quotas become per-day counters there.
-2. **Shared approvals and pins.** Move both stores into a small transactional
-   database. Approval consumption is already a single compare-and-delete, so
-   it translates to a conditional delete; pin approval is a compare-and-set on
-   the hash.
-3. **Audit pipeline.** Keep the local hash-chained file as the write-ahead
-   record, ship records to a central append-only store, and publish chain
-   heads (or a Merkle tree head, as Certificate Transparency does) somewhere
-   the gateway operators cannot rewrite.
-4. **Identity from the platform.** Replace shared-secret tokens with
-   asymmetric ones verified against the identity provider's JWKS (pinned
-   issuer, no key fetching from token headers), or workload identity such as
-   SPIFFE [12], and OAuth resource indicators per the MCP authorization
-   specification.
-5. **Egress control.** Put upstream traffic, and the tools' own outbound
-   traffic, behind an egress proxy that resolves names and blocks private
-   ranges at connect time, closing the DNS gap left by name-based allow-lists.
-6. **Policy distribution.** Serve signed policy bundles from a control plane
-   and keep the same compile-then-swap reload, so every replica changes policy
-   atomically and reports the hash it is enforcing.
+## Going wider than one process
+
+Running this for many agents across machines would change six things.
+
+Buckets and quotas live in each gateway's memory, so N replicas allow N
+times the rate. GCRA [13] keeps one timestamp per key, which maps onto an
+atomic compare-and-set in Redis or a similar store, the way redis-cell [11]
+does it; quotas become per-day counters in the same place.
+
+Approvals and pins would move into a small transactional database. Using up
+an approval is already a single compare-and-delete, so it becomes a
+conditional delete, and approving a pin is a compare-and-set on the hash.
+
+The local hash-chained file stays as the write-ahead record, but records are
+shipped to a central append-only store and the chain heads (or a Merkle tree
+head, as Certificate Transparency publishes) go somewhere the gateway's
+operators cannot rewrite.
+
+Shared-secret tokens give way to asymmetric ones verified against the
+identity provider's JWKS, with a pinned issuer and no key fetching from token
+headers, or to workload identity such as SPIFFE [12], together with OAuth
+resource indicators as the MCP authorization spec describes.
+
+Upstream traffic, and the tools' own outbound traffic, goes through an egress
+proxy that resolves names and blocks private ranges at connect time. That
+closes the DNS gap a name-based allow-list leaves open.
+
+Finally, policy comes from a control plane as signed bundles, applied with
+the same compile-then-swap reload, so every replica changes policy atomically
+and reports the hash it enforces.
 
 ## References
 
