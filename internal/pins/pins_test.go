@@ -126,10 +126,11 @@ func TestPersistFailureFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Observe("a.x", defB) // quarantine while the disk works
-	if err := os.Chmod(filepath.Join(dir, "sub"), 0o500); err != nil {
+	// Removing the directory fails the temp file creation for any user,
+	// unlike a read-only mode, which root ignores.
+	if err := os.RemoveAll(filepath.Join(dir, "sub")); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chmod(filepath.Join(dir, "sub"), 0o700)
 	if ok, _, err := s.Observe("a.new", defA); ok || err == nil {
 		t.Fatal("unpersisted new tool was trusted")
 	}
@@ -147,5 +148,37 @@ func TestPersistFailureFailsClosed(t *testing.T) {
 	}
 	if ok, q, err := s.Observe("a.x", defC); ok || !q || err == nil || !strings.Contains(err.Error(), "pins:") {
 		t.Fatalf("quarantine must hold even when it cannot be saved: %v %v %v", ok, q, err)
+	}
+}
+
+func TestRenameFailureFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pins.json")
+	s, err := Open(path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, _, err := s.Observe("a.x", defA); !ok || err != nil {
+		t.Fatal(err)
+	}
+	// The temp file can be written, but renaming over a non-empty
+	// directory cannot succeed.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(path, "keep"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _, err := s.Observe("a.new", defA); ok || err == nil {
+		t.Fatal("tool trusted although the pins could not be saved")
+	}
+	if _, ok := s.Get("a.new"); ok {
+		t.Fatal("unpersisted pin kept")
+	}
+	if ok, q, err := s.Observe("a.x", defB); ok || !q || err == nil {
+		t.Fatalf("quarantine must hold when the save fails: %v %v %v", ok, q, err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".pins-*.tmp")); len(left) != 0 {
+		t.Fatalf("temp files left behind: %v", left)
 	}
 }
