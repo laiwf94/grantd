@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/config"
-	"github.com/laiwf94/grantd/internal/authn/keyfile"
-	"github.com/laiwf94/grantd/internal/authn/oidc"
-	"github.com/laiwf94/grantd/internal/authn/saml"
+	"github.com/laiwf94/authz/internal/authn/config"
+	"github.com/laiwf94/authz/internal/authn/keyfile"
+	"github.com/laiwf94/authz/internal/authn/oidc"
+	"github.com/laiwf94/authz/internal/authn/saml"
 )
 
 // DefaultTimeout bounds the online checks of one provider.

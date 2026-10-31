@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
 )
 
 func clientFor(url string, mut ...func(*ClientConfig)) *Client {

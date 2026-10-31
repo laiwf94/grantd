@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
 )
 
 func mustCompile(t testing.TB, src string) *Schema {

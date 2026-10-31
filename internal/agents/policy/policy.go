@@ -27,9 +27,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/laiwf94/grantd/internal/agents/guard"
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
-	"github.com/laiwf94/grantd/internal/agents/schema"
+	"github.com/laiwf94/authz/internal/agents/guard"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/schema"
 )
 
 // Limits on a policy document.

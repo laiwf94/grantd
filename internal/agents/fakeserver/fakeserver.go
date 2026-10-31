@@ -23,9 +23,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/httpx"
-	"github.com/laiwf94/grantd/internal/agents/mcp"
-	"github.com/laiwf94/grantd/internal/agents/metrics"
+	"github.com/laiwf94/authz/internal/agents/httpx"
+	"github.com/laiwf94/authz/internal/agents/mcp"
+	"github.com/laiwf94/authz/internal/agents/metrics"
 )
 
 // Limits.

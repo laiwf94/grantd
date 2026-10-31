@@ -19,11 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/check"
-	"github.com/laiwf94/grantd/internal/metrics"
-	"github.com/laiwf94/grantd/internal/schema"
-	"github.com/laiwf94/grantd/internal/store"
-	"github.com/laiwf94/grantd/internal/token"
+	"github.com/laiwf94/authz/internal/check"
+	"github.com/laiwf94/authz/internal/metrics"
+	"github.com/laiwf94/authz/internal/schema"
+	"github.com/laiwf94/authz/internal/store"
+	"github.com/laiwf94/authz/internal/token"
 )
 
 // Request limits.

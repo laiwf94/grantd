@@ -40,7 +40,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/fakeidp"
+	"github.com/laiwf94/authz/internal/authn/fakeidp"
 )
 
 func main() {

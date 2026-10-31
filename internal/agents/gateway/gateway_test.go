@@ -17,13 +17,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/audit"
-	"github.com/laiwf94/grantd/internal/agents/fakeserver"
-	"github.com/laiwf94/grantd/internal/agents/identity"
-	"github.com/laiwf94/grantd/internal/agents/mcp"
-	"github.com/laiwf94/grantd/internal/agents/metrics"
-	"github.com/laiwf94/grantd/internal/agents/pins"
-	"github.com/laiwf94/grantd/internal/agents/policy"
+	"github.com/laiwf94/authz/internal/agents/audit"
+	"github.com/laiwf94/authz/internal/agents/fakeserver"
+	"github.com/laiwf94/authz/internal/agents/identity"
+	"github.com/laiwf94/authz/internal/agents/mcp"
+	"github.com/laiwf94/authz/internal/agents/metrics"
+	"github.com/laiwf94/authz/internal/agents/pins"
+	"github.com/laiwf94/authz/internal/agents/policy"
 )
 
 const (

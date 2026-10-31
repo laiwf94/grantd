@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/config"
-	"github.com/laiwf94/grantd/internal/authn/keyfile"
-	"github.com/laiwf94/grantd/internal/authn/oidc"
-	"github.com/laiwf94/grantd/internal/authn/policy"
-	"github.com/laiwf94/grantd/internal/authn/redirect"
-	"github.com/laiwf94/grantd/internal/authn/saml"
+	"github.com/laiwf94/authz/internal/authn/config"
+	"github.com/laiwf94/authz/internal/authn/keyfile"
+	"github.com/laiwf94/authz/internal/authn/oidc"
+	"github.com/laiwf94/authz/internal/authn/policy"
+	"github.com/laiwf94/authz/internal/authn/redirect"
+	"github.com/laiwf94/authz/internal/authn/saml"
 )
 
 // runtime is everything built from one configuration file. A reload builds

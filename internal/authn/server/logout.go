@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/laiwf94/grantd/internal/authn/config"
+	"github.com/laiwf94/authz/internal/authn/config"
 )
 
 // handleLogoutPage shows a confirmation with a POST form. Logging out only

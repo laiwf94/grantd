@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/metrics"
+	"github.com/laiwf94/authz/internal/agents/metrics"
 )
 
 // HeaderRequestID carries the request ID in both directions.

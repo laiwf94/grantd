@@ -37,17 +37,17 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/laiwf94/grantd/internal/agents/approval"
-	"github.com/laiwf94/grantd/internal/agents/audit"
-	"github.com/laiwf94/grantd/internal/agents/guard"
-	"github.com/laiwf94/grantd/internal/agents/httpx"
-	"github.com/laiwf94/grantd/internal/agents/identity"
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
-	"github.com/laiwf94/grantd/internal/agents/mcp"
-	"github.com/laiwf94/grantd/internal/agents/metrics"
-	"github.com/laiwf94/grantd/internal/agents/pins"
-	"github.com/laiwf94/grantd/internal/agents/policy"
-	"github.com/laiwf94/grantd/internal/agents/ratelimit"
+	"github.com/laiwf94/authz/internal/agents/approval"
+	"github.com/laiwf94/authz/internal/agents/audit"
+	"github.com/laiwf94/authz/internal/agents/guard"
+	"github.com/laiwf94/authz/internal/agents/httpx"
+	"github.com/laiwf94/authz/internal/agents/identity"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/mcp"
+	"github.com/laiwf94/authz/internal/agents/metrics"
+	"github.com/laiwf94/authz/internal/agents/pins"
+	"github.com/laiwf94/authz/internal/agents/policy"
+	"github.com/laiwf94/authz/internal/agents/ratelimit"
 )
 
 // Version is reported as serverInfo.version.

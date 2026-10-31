@@ -8,8 +8,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/check"
-	"github.com/laiwf94/grantd/internal/authn/config"
+	"github.com/laiwf94/authz/internal/authn/check"
+	"github.com/laiwf94/authz/internal/authn/config"
 )
 
 // Exit codes of "wicket check".

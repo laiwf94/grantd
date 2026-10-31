@@ -5,7 +5,7 @@
 // imports that pointed at the old location.
 //
 //	go run scripts/rewrite-imports.go \
-//	    -map github.com/laiwf94/wicket/internal=github.com/laiwf94/grantd/internal/authn \
+//	    -map github.com/laiwf94/wicket/internal=github.com/laiwf94/authz/internal/authn \
 //	    internal/authn cmd examples
 //
 // Only import specs change; each file is checked to be byte-identical to the
@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/laiwf94/grantd/internal/importrewrite"
+	"github.com/laiwf94/authz/internal/importrewrite"
 )
 
 type mapsFlag []importrewrite.Mapping

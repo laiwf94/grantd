@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/jose"
-	"github.com/laiwf94/grantd/internal/authn/redirect"
+	"github.com/laiwf94/authz/internal/authn/jose"
+	"github.com/laiwf94/authz/internal/authn/redirect"
 )
 
 // Limits and defaults.

@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/policy"
+	"github.com/laiwf94/authz/internal/authn/policy"
 )
 
 // Defaults and limits.

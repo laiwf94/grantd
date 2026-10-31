@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/laiwf94/grantd/internal/authn/fakeidp"
+	"github.com/laiwf94/authz/internal/authn/fakeidp"
 	dsig "github.com/russellhaering/goxmldsig"
 )
 

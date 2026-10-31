@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/laiwf94/grantd/internal/agents/mcp"
+	"github.com/laiwf94/authz/internal/agents/mcp"
 )
 
 func newServer(t *testing.T, cfg Config) (*Server, *mcp.Client, string) {

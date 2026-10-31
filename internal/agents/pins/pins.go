@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
 )
 
 // Errors.

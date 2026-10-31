@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/policy"
+	"github.com/laiwf94/authz/internal/authn/policy"
 )
 
 type clock struct {

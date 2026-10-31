@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/laiwf94/grantd/internal/schema"
-	"github.com/laiwf94/grantd/internal/store"
+	"github.com/laiwf94/authz/internal/schema"
+	"github.com/laiwf94/authz/internal/store"
 )
 
 // DefaultMaxDepth bounds how many hops (group in group, folder in folder) a

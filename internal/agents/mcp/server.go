@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/httpx"
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/httpx"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
 )
 
 // Caller describes one authenticated request to a Handler.

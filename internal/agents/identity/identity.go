@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/policy"
+	"github.com/laiwf94/authz/internal/agents/policy"
 )
 
 // Limits and defaults.

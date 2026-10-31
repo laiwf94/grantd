@@ -1,4 +1,4 @@
-module github.com/laiwf94/grantd
+module github.com/laiwf94/authz
 
 go 1.27.3
 

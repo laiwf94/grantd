@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/laiwf94/grantd/internal/authn/oidc"
-	"github.com/laiwf94/grantd/internal/authn/policy"
+	"github.com/laiwf94/authz/internal/authn/oidc"
+	"github.com/laiwf94/authz/internal/authn/policy"
 )
 
 // Error is a rejected SAML response. Reason is a stable code for audit logs.

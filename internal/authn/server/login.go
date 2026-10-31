@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/config"
-	"github.com/laiwf94/grantd/internal/authn/oidc"
-	"github.com/laiwf94/grantd/internal/authn/policy"
-	"github.com/laiwf94/grantd/internal/authn/saml"
-	"github.com/laiwf94/grantd/internal/authn/session"
+	"github.com/laiwf94/authz/internal/authn/config"
+	"github.com/laiwf94/authz/internal/authn/oidc"
+	"github.com/laiwf94/authz/internal/authn/policy"
+	"github.com/laiwf94/authz/internal/authn/saml"
+	"github.com/laiwf94/authz/internal/authn/session"
 )
 
 // callbackTimeout bounds all back-channel calls of one callback (discovery,

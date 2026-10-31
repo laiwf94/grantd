@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/laiwf94/grantd/internal/schema"
-	"github.com/laiwf94/grantd/internal/store"
+	"github.com/laiwf94/authz/internal/schema"
+	"github.com/laiwf94/authz/internal/store"
 )
 
 // Trace limits. A trace never holds more nodes than a check may do work,

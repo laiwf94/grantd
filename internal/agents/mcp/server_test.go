@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
 )
 
 type testHandler struct {

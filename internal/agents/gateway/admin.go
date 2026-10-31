@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/approval"
-	"github.com/laiwf94/grantd/internal/agents/httpx"
-	"github.com/laiwf94/grantd/internal/agents/pins"
+	"github.com/laiwf94/authz/internal/agents/approval"
+	"github.com/laiwf94/authz/internal/agents/httpx"
+	"github.com/laiwf94/authz/internal/agents/pins"
 )
 
 // AdminHandler returns the administrator API. Every route except /healthz

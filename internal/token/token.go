@@ -14,7 +14,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/laiwf94/grantd/internal/store"
+	"github.com/laiwf94/authz/internal/store"
 )
 
 // KeySize is the required key length in bytes.

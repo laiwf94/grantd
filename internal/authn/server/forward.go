@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/session"
+	"github.com/laiwf94/authz/internal/authn/session"
 )
 
 // Identity headers sent to the proxy on success. The proxy copies them to

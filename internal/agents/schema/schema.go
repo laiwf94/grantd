@@ -28,7 +28,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
 )
 
 // Compile limits. They bound the cost of compiling and evaluating a schema

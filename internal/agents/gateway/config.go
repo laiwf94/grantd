@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/agents/identity"
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
-	"github.com/laiwf94/grantd/internal/agents/policy"
-	"github.com/laiwf94/grantd/internal/agents/ratelimit"
+	"github.com/laiwf94/authz/internal/agents/identity"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/policy"
+	"github.com/laiwf94/authz/internal/agents/ratelimit"
 )
 
 // MaxConfigBytes bounds the configuration file.

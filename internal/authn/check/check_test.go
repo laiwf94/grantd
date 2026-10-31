@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/laiwf94/grantd/internal/authn/config"
-	"github.com/laiwf94/grantd/internal/authn/fakeidp"
+	"github.com/laiwf94/authz/internal/authn/config"
+	"github.com/laiwf94/authz/internal/authn/fakeidp"
 )
 
 var now = time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)

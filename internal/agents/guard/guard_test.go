@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/laiwf94/grantd/internal/agents/jsonrpc"
+	"github.com/laiwf94/authz/internal/agents/jsonrpc"
 )
 
 func decode(t *testing.T, s string) map[string]any {
