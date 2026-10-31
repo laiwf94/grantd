@@ -32,5 +32,6 @@ jobs:
           go test ./internal/redirect -run=^$ -fuzz=FuzzValidate -fuzztime=20s
           go test ./internal/saml -run=^$ -fuzz=FuzzParseResponse -fuzztime=30s
           go test ./internal/saml -run=^$ -fuzz=FuzzParseMetadata -fuzztime=20s
+          go test ./internal/config -run=^$ -fuzz=FuzzCheck -fuzztime=20s
       - name: Vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

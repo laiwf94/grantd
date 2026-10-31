@@ -186,3 +186,29 @@ func BenchmarkValidate(b *testing.B) {
 		}
 	}
 }
+
+func TestCheckHost(t *testing.T) {
+	for _, c := range []struct {
+		p        string
+		wildcard bool
+		ok       bool
+	}{
+		{"app.example.com", false, true}, {"App.Example.com:8443", false, true}, {"10.0.0.1:443", false, true},
+		{"*.example.com", true, true}, {"*.example.com", false, false}, {"a b", true, false}, {"a_b.com", false, false},
+		{"x.com:", false, false}, {"x.com:123456", false, false}, {"", false, false}, {"-a.com", false, false},
+	} {
+		if err := CheckHost(c.p, c.wildcard); (err == nil) != c.ok {
+			t.Errorf("CheckHost(%q, %v) = %v", c.p, c.wildcard, err)
+		}
+		// CheckHost accepts exactly what New accepts.
+		if c.wildcard || !strings.HasPrefix(c.p, "*.") {
+			_, err := New([]string{c.p}, &url.URL{Scheme: "https", Host: "gw.example.com"})
+			if (err == nil) != c.ok {
+				t.Errorf("New(%q) = %v, CheckHost disagrees", c.p, err)
+			}
+		}
+	}
+	if Canonical("A.com") != "a.com:443" || Canonical("a.com:80") != "a.com:80" {
+		t.Error("Canonical")
+	}
+}

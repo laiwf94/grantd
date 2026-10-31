@@ -5,7 +5,6 @@
 package config
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +15,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/laiwf94/wicket/internal/jose"
+	"github.com/laiwf94/wicket/internal/redirect"
 )
 
 // Limits and defaults.
@@ -131,54 +133,59 @@ type Allow struct {
 	Groups       []string `json:"groups"`
 }
 
-// Load reads and validates the file at path. getenv resolves
-// client_secret_env.
-func Load(path string, getenv func(string) string) (*Config, error) {
+// ReadFile reads a configuration file, refusing anything larger than
+// MaxFileBytes.
+func ReadFile(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("config: %w", err)
+		return nil, err
 	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("config: %w", err)
+		return nil, err
 	}
 	if len(b) > MaxFileBytes {
-		return nil, fmt.Errorf("config: file larger than %d bytes", MaxFileBytes)
+		return nil, fmt.Errorf("%s: file larger than %d bytes", path, MaxFileBytes)
+	}
+	return b, nil
+}
+
+// Load reads and validates the file at path. getenv resolves
+// client_secret_env.
+func Load(path string, getenv func(string) string) (*Config, error) {
+	b, err := ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
 	}
 	return Parse(b, getenv)
 }
 
-// Parse validates a configuration document.
+// Parse validates a configuration document. The error, if any, is a
+// Problems listing every error in the document; warnings are dropped (use
+// Check to see them).
 func Parse(b []byte, getenv func(string) string) (*Config, error) {
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	var c Config
-	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("config: %v", err)
-	}
-	if dec.More() {
-		return nil, errors.New("config: trailing data after the JSON object")
-	}
-	if err := c.validate(getenv); err != nil {
+	r := Check(b, getenv)
+	if err := r.Problems.Err(); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	return &c, nil
+	return r.Config, nil
 }
 
-func (c *Config) validate(getenv func(string) string) error {
+func (c *Config) validate(getenv func(string) string, pc *Result) {
 	u, err := url.Parse(c.PublicURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("public_url must be an absolute https URL without query or fragment (cookies are Secure)")
+		pc.Errorf("$.public_url", "must be an absolute https URL without query or fragment (cookies are Secure)")
+	} else {
+		u.Path = strings.TrimSuffix(u.Path, "/")
+		c.Public = u
+		c.PublicURL = u.String()
 	}
-	u.Path = strings.TrimSuffix(u.Path, "/")
-	c.Public = u
-	c.PublicURL = u.String()
-	if c.CookieDomain != "" {
+	if c.CookieDomain != "" && c.Public != nil {
 		d := strings.TrimPrefix(strings.ToLower(c.CookieDomain), ".")
-		host := strings.ToLower(u.Hostname())
+		host := strings.ToLower(c.Public.Hostname())
 		if net.ParseIP(d) != nil || !strings.Contains(d, ".") || (host != d && !strings.HasSuffix(host, "."+d)) {
-			return fmt.Errorf("cookie_domain %q must be a parent domain of the public_url host %q", c.CookieDomain, host)
+			pc.Errorf("$.cookie_domain", "%q must be a parent domain of the public_url host %q", c.CookieDomain, host)
 		}
 		c.CookieDomain = d
 	}
@@ -188,164 +195,297 @@ func (c *Config) validate(getenv func(string) string) error {
 	if c.Session.AbsoluteTimeout == 0 {
 		c.Session.AbsoluteTimeout = Duration(DefaultAbsolute)
 	}
-	if c.Session.AbsoluteTimeout > Duration(MaxAbsolute) || c.Session.IdleTimeout > c.Session.AbsoluteTimeout ||
-		c.Session.IdleTimeout < Duration(time.Minute) {
-		return fmt.Errorf("session timeouts: idle must be at least 1m and at most absolute; absolute at most %s", MaxAbsolute)
+	if c.Session.AbsoluteTimeout > Duration(MaxAbsolute) {
+		pc.Errorf("$.session.absolute_timeout", "must be at most %s", MaxAbsolute)
+	}
+	if c.Session.IdleTimeout < Duration(time.Minute) {
+		pc.Errorf("$.session.idle_timeout", "must be at least 1m")
+	} else if c.Session.IdleTimeout > c.Session.AbsoluteTimeout {
+		pc.Errorf("$.session.idle_timeout", "must not be longer than absolute_timeout (%s)", time.Duration(c.Session.AbsoluteTimeout))
 	}
 	if c.ClockSkew == 0 {
 		c.ClockSkew = Duration(DefaultSkew)
 	}
 	if c.ClockSkew > Duration(MaxSkew) {
-		return fmt.Errorf("clock_skew must be at most %s", MaxSkew)
+		pc.Errorf("$.clock_skew", "must be at most %s", MaxSkew)
 	}
 	if c.UpstreamTokenTTL == 0 {
 		c.UpstreamTokenTTL = Duration(DefaultTokenTTL)
 	}
 	if c.UpstreamTokenTTL < Duration(10*time.Second) || c.UpstreamTokenTTL > Duration(MaxTokenTTL) {
-		return fmt.Errorf("upstream_token_ttl must be between 10s and %s", MaxTokenTTL)
+		pc.Errorf("$.upstream_token_ttl", "must be between 10s and %s", MaxTokenTTL)
 	}
 	if len(c.RedirectHosts) > maxListEntries {
-		return errors.New("too many redirect_hosts")
+		pc.Errorf("$.redirect_hosts", "more than %d entries", maxListEntries)
+	}
+	hostsOK := true
+	for i, h := range c.RedirectHosts {
+		if err := redirect.CheckHost(h, true); err != nil {
+			pc.Errorf(indexPath("$.redirect_hosts", i), "%v", err)
+			hostsOK = false
+		}
 	}
 
-	if len(c.Providers) == 0 || len(c.Providers) > maxProviders {
-		return fmt.Errorf("need 1 to %d providers", maxProviders)
+	providers := c.validateProviders(getenv, pc)
+	used, appHostsOK := c.validateApps(providers, pc)
+	for i, p := range c.Providers {
+		if providers[p.ID] == i && !used[p.ID] {
+			pc.Warnf(indexPath("$.providers", i), "provider %s is not used by any app", p.ID)
+		}
 	}
-	providers := map[string]*Provider{}
+
+	// Every app's default_url must pass the same return-URL check as a
+	// login's rd parameter, or the login would end on an error page.
+	if c.Public == nil || !hostsOK || !appHostsOK {
+		return
+	}
+	var all []string
+	for _, a := range c.Apps {
+		all = append(all, a.Hosts...)
+	}
+	v, err := redirect.New(append(all, c.RedirectHosts...), c.Public)
+	if err != nil {
+		pc.Errorf("$.redirect_hosts", "%v", err)
+		return
+	}
+	for i, a := range c.Apps {
+		if a.DefaultURL == "" {
+			continue
+		}
+		if _, err := v.Validate(a.DefaultURL); err != nil {
+			pc.Errorf(indexPath("$.apps", i)+".default_url", "%q is not on an app host or a redirect_hosts entry", a.DefaultURL)
+		}
+	}
+}
+
+// validateProviders returns the index of the first provider with each id.
+func (c *Config) validateProviders(getenv func(string) string, pc *Result) map[string]int {
+	if len(c.Providers) == 0 || len(c.Providers) > maxProviders {
+		pc.Errorf("$.providers", "need 1 to %d providers", maxProviders)
+	}
+	providers := map[string]int{}
 	for i := range c.Providers {
 		p := &c.Providers[i]
+		path := indexPath("$.providers", i)
 		if !idRe.MatchString(p.ID) {
-			return fmt.Errorf("provider id %q must be 1-32 lower-case letters, digits or '-'", p.ID)
+			pc.Errorf(path+".id", "provider id %q must be 1-32 lower-case letters, digits or '-'", p.ID)
+		} else if j, dup := providers[p.ID]; dup {
+			pc.Errorf(path+".id", "duplicate provider id %q (also $.providers[%d])", p.ID, j)
+		} else {
+			providers[p.ID] = i
 		}
-		if providers[p.ID] != nil {
-			return fmt.Errorf("duplicate provider id %q", p.ID)
-		}
-		providers[p.ID] = p
 		if p.DisplayName == "" {
 			p.DisplayName = p.ID
 		}
 		if len(p.DisplayName) > maxDisplayNameLen {
-			return fmt.Errorf("provider %s: display_name longer than %d", p.ID, maxDisplayNameLen)
+			pc.Errorf(path+".display_name", "longer than %d characters", maxDisplayNameLen)
 		}
-		var err error
 		switch p.Type {
 		case ProviderOIDC:
-			err = p.validateOIDC(getenv)
+			p.validateOIDC(path, getenv, pc)
 		case ProviderSAML:
-			err = p.validateSAML()
+			p.validateSAML(path, pc)
 		default:
-			err = fmt.Errorf("type must be %q or %q", ProviderOIDC, ProviderSAML)
-		}
-		if err != nil {
-			return fmt.Errorf("provider %s: %w", p.ID, err)
+			pc.Errorf(path+".type", "must be %q or %q", ProviderOIDC, ProviderSAML)
 		}
 	}
+	return providers
+}
 
+// validateApps returns the providers some app uses, and whether every app
+// host is well-formed.
+func (c *Config) validateApps(providers map[string]int, pc *Result) (map[string]bool, bool) {
 	if len(c.Apps) == 0 || len(c.Apps) > maxApps {
-		return fmt.Errorf("need 1 to %d apps", maxApps)
+		pc.Errorf("$.apps", "need 1 to %d apps", maxApps)
 	}
-	apps := map[string]bool{}
-	hosts := map[string]string{}
+	used := map[string]bool{}
+	hostsOK := true
+	apps := map[string]int{}
+	hosts := map[string]string{} // canonical host:port -> path of its first use
 	for i := range c.Apps {
 		a := &c.Apps[i]
+		path := indexPath("$.apps", i)
 		if !idRe.MatchString(a.ID) {
-			return fmt.Errorf("app id %q must be 1-32 lower-case letters, digits or '-'", a.ID)
+			pc.Errorf(path+".id", "app id %q must be 1-32 lower-case letters, digits or '-'", a.ID)
+		} else if j, dup := apps[a.ID]; dup {
+			pc.Errorf(path+".id", "duplicate app id %q (also $.apps[%d])", a.ID, j)
+		} else {
+			apps[a.ID] = i
 		}
-		if apps[a.ID] {
-			return fmt.Errorf("duplicate app id %q", a.ID)
-		}
-		apps[a.ID] = true
 		if len(a.Hosts) == 0 {
-			return fmt.Errorf("app %s: at least one host is required", a.ID)
+			pc.Errorf(path+".hosts", "at least one host is required")
+			hostsOK = false
 		}
 		for j, h := range a.Hosts {
 			h = strings.ToLower(h)
-			if h == "" || strings.ContainsAny(h, "/*@ ") {
-				return fmt.Errorf("app %s: invalid host %q (use host or host:port)", a.ID, h)
-			}
-			if other, dup := hosts[h]; dup {
-				return fmt.Errorf("host %q belongs to both %s and %s", h, other, a.ID)
-			}
-			hosts[h] = a.ID
 			a.Hosts[j] = h
+			hp := indexPath(path+".hosts", j)
+			if err := redirect.CheckHost(h, false); err != nil {
+				pc.Errorf(hp, "%v", err)
+				hostsOK = false
+				continue
+			}
+			// "host" and "host:443" are the same https origin, and
+			// forward-auth treats them as one.
+			canon := redirect.Canonical(h)
+			if other, dup := hosts[canon]; dup {
+				if strings.HasPrefix(other, path+".") {
+					pc.Warnf(hp, "host %q is listed twice in this app (also %s)", h, other)
+				} else {
+					pc.Errorf(hp, "host %q overlaps %s: each host belongs to one app", h, other)
+				}
+				continue
+			}
+			hosts[canon] = hp
 		}
 		if len(a.Providers) == 0 {
-			return fmt.Errorf("app %s: list the identity providers it accepts", a.ID)
+			pc.Errorf(path+".providers", "list the identity providers this app accepts")
 		}
-		for _, pid := range a.Providers {
-			if providers[pid] == nil {
-				return fmt.Errorf("app %s: unknown provider %q", a.ID, pid)
+		seen := map[string]bool{}
+		for j, pid := range a.Providers {
+			pp := indexPath(path+".providers", j)
+			if _, ok := providers[pid]; !ok {
+				pc.Errorf(pp, "unknown provider %q", pid)
+			} else if seen[pid] {
+				pc.Warnf(pp, "provider %q is listed twice", pid)
 			}
+			seen[pid] = true
+			used[pid] = true
 		}
-		if n := len(a.Allow.Emails) + len(a.Allow.EmailDomains) + len(a.Allow.Groups); n > maxListEntries {
-			return fmt.Errorf("app %s: allow lists have more than %d entries", a.ID, maxListEntries)
+		al := a.Allow
+		if n := len(al.Emails) + len(al.EmailDomains) + len(al.Groups); n > maxListEntries {
+			pc.Errorf(path+".allow", "allow lists have more than %d entries", maxListEntries)
+		} else if n == 0 && !al.AnyUser {
+			pc.Warnf(path+".allow", "nobody is allowed: set any_user or list emails, email_domains or groups")
+		} else if n > 0 && al.AnyUser {
+			pc.Warnf(path+".allow", "any_user allows everyone from the app's providers; the other lists have no effect")
 		}
-		for _, d := range a.Allow.EmailDomains {
+		for j, d := range al.EmailDomains {
 			if d == "" || strings.ContainsAny(d, "@ ") || strings.HasPrefix(d, ".") {
-				return fmt.Errorf("app %s: email domain %q should look like example.com", a.ID, d)
+				pc.Errorf(indexPath(path+".allow.email_domains", j), "email domain %q should look like example.com", d)
 			}
 		}
-		for _, e := range a.Allow.Emails {
+		for j, e := range al.Emails {
 			if strings.Count(e, "@") != 1 {
-				return fmt.Errorf("app %s: email %q is not an address", a.ID, e)
+				pc.Errorf(indexPath(path+".allow.emails", j), "%q is not an email address", e)
 			}
 		}
-		if a.DefaultURL == "" {
+		if a.DefaultURL == "" && len(a.Hosts) > 0 {
 			a.DefaultURL = "https://" + a.Hosts[0] + "/"
-		}
-		if du, err := url.Parse(a.DefaultURL); err != nil || du.Scheme != "https" || du.Host == "" {
-			return fmt.Errorf("app %s: default_url must be an absolute https URL", a.ID)
+		} else if du, err := url.Parse(a.DefaultURL); a.DefaultURL != "" && (err != nil || du.Scheme != "https" || du.Host == "") {
+			pc.Errorf(path+".default_url", "must be an absolute https URL")
+			a.DefaultURL = ""
 		}
 	}
-	return nil
+	return used, hostsOK
 }
 
-func (p *Provider) validateOIDC(getenv func(string) string) error {
-	if p.IdPMetadataFile != "" || p.IdPMetadataURL != "" || p.SPKeyFile != "" || p.SPCertFile != "" || p.EntityID != "" ||
-		p.SignRequests || p.NameIDFormat != "" || p.EmailAttribute != "" || p.NameAttribute != "" || p.GroupsAttribute != "" {
-		return errors.New("SAML settings on an oidc provider")
+func requireHTTPS(pc *Result, path, u string) bool {
+	p, err := url.Parse(u)
+	if err != nil || p.Scheme != "https" || p.Host == "" || p.User != nil || p.Fragment != "" {
+		pc.Errorf(path, "%q must be an absolute https URL without user info or fragment", u)
+		return false
 	}
-	if p.Issuer == "" || p.ClientID == "" {
-		return errors.New("issuer and client_id are required")
+	return true
+}
+
+func (p *Provider) validateOIDC(path string, getenv func(string) string, pc *Result) {
+	for name, set := range map[string]bool{"idp_metadata_file": p.IdPMetadataFile != "", "idp_metadata_url": p.IdPMetadataURL != "",
+		"sp_key_file": p.SPKeyFile != "", "sp_cert_file": p.SPCertFile != "", "entity_id": p.EntityID != "",
+		"sign_requests": p.SignRequests, "name_id_format": p.NameIDFormat != "", "email_attribute": p.EmailAttribute != "",
+		"name_attribute": p.NameAttribute != "", "groups_attribute": p.GroupsAttribute != ""} {
+		if set {
+			pc.Errorf(path+"."+name, "SAML setting on an oidc provider")
+		}
 	}
-	if p.ClientSecretEnv != "" && p.ClientSecretFile != "" {
-		return errors.New("set client_secret_env or client_secret_file, not both")
+	if p.Issuer == "" {
+		pc.Errorf(path, "issuer is required")
+	} else {
+		requireHTTPS(pc, path+".issuer", p.Issuer)
+	}
+	if p.ClientID == "" {
+		pc.Errorf(path, "client_id is required")
 	}
 	switch {
+	case p.ClientSecretEnv != "" && p.ClientSecretFile != "":
+		pc.Errorf(path+".client_secret_file", "set client_secret_env or client_secret_file, not both")
 	case p.ClientSecretEnv != "":
 		p.ClientSecret = getenv(p.ClientSecretEnv)
 		if p.ClientSecret == "" {
-			return fmt.Errorf("environment variable %s is empty", p.ClientSecretEnv)
+			pc.Errorf(path+".client_secret_env", "environment variable %s is empty", p.ClientSecretEnv)
 		}
 	case p.ClientSecretFile != "":
 		b, err := os.ReadFile(p.ClientSecretFile)
 		if err != nil {
-			return fmt.Errorf("client_secret_file: %w", err)
+			pc.Errorf(path+".client_secret_file", "%v", err)
+		} else if p.ClientSecret = strings.TrimSpace(string(b)); p.ClientSecret == "" {
+			pc.Errorf(path+".client_secret_file", "%s is empty", p.ClientSecretFile)
 		}
-		p.ClientSecret = strings.TrimSpace(string(b))
+	}
+	secretSet := p.ClientSecretEnv != "" || p.ClientSecretFile != ""
+	switch p.ClientAuth {
+	case "", "client_secret_basic", "client_secret_post":
+		if !secretSet {
+			pc.Errorf(path, "a client secret is required (set client_secret_env or client_secret_file, or client_auth \"none\" for a public client)")
+		}
+	case "none":
+		if secretSet {
+			pc.Warnf(path+".client_auth", "the client secret is never sent with client_auth \"none\"")
+		}
+	default:
+		pc.Errorf(path+".client_auth", "%q is not one of client_secret_basic, client_secret_post, none", p.ClientAuth)
+	}
+	if len(p.Scopes) > 0 {
+		hasOpenID := false
+		for j, s := range p.Scopes {
+			hasOpenID = hasOpenID || s == "openid"
+			if s == "" || strings.ContainsAny(s, " \"\\") {
+				pc.Errorf(indexPath(path+".scopes", j), "invalid scope %q", s)
+			}
+		}
+		if !hasOpenID {
+			pc.Errorf(path+".scopes", `must include "openid"`)
+		}
+	}
+	for j, a := range p.Algorithms {
+		if !jose.IsSupported(a) {
+			pc.Errorf(indexPath(path+".algorithms", j), "algorithm %q is not allowed (use one of %s)", a, strings.Join(jose.SupportedAlgorithms, ", "))
+		}
 	}
 	if p.PostLogoutRedirectURL != "" {
 		if u, err := url.Parse(p.PostLogoutRedirectURL); err != nil || u.Scheme != "https" || u.Host == "" {
-			return errors.New("post_logout_redirect_url must be an absolute https URL")
+			pc.Errorf(path+".post_logout_redirect_url", "must be an absolute https URL")
 		}
 	}
-	return nil
 }
 
-func (p *Provider) validateSAML() error {
-	if p.Issuer != "" || p.ClientID != "" || p.ClientSecretEnv != "" || p.ClientSecretFile != "" || p.ClientAuth != "" ||
-		len(p.Scopes) > 0 || len(p.Algorithms) > 0 || p.EmailClaim != "" || p.NameClaim != "" || p.GroupsClaim != "" ||
-		p.Userinfo || len(p.TrustedAudiences) > 0 || p.PostLogoutRedirectURL != "" {
-		return errors.New("OpenID Connect settings on a saml provider")
+func (p *Provider) validateSAML(path string, pc *Result) {
+	for name, set := range map[string]bool{"issuer": p.Issuer != "", "client_id": p.ClientID != "",
+		"client_secret_env": p.ClientSecretEnv != "", "client_secret_file": p.ClientSecretFile != "",
+		"client_auth": p.ClientAuth != "", "scopes": len(p.Scopes) > 0, "algorithms": len(p.Algorithms) > 0,
+		"email_claim": p.EmailClaim != "", "name_claim": p.NameClaim != "", "groups_claim": p.GroupsClaim != "",
+		"userinfo": p.Userinfo, "trusted_audiences": len(p.TrustedAudiences) > 0,
+		"post_logout_redirect_url": p.PostLogoutRedirectURL != ""} {
+		if set {
+			pc.Errorf(path+"."+name, "OpenID Connect setting on a saml provider")
+		}
 	}
-	if (p.IdPMetadataFile == "") == (p.IdPMetadataURL == "") {
-		return errors.New("set exactly one of idp_metadata_file and idp_metadata_url")
+	switch {
+	case p.IdPMetadataFile != "" && p.IdPMetadataURL != "":
+		pc.Errorf(path+".idp_metadata_url", "set exactly one of idp_metadata_file and idp_metadata_url")
+	case p.IdPMetadataFile == "" && p.IdPMetadataURL == "":
+		pc.Errorf(path, "set idp_metadata_file or idp_metadata_url")
+	case p.IdPMetadataURL != "":
+		if u, err := url.Parse(p.IdPMetadataURL); err != nil || u.Scheme != "https" || u.Host == "" {
+			pc.Errorf(path+".idp_metadata_url", "must be an absolute https URL")
+		}
 	}
-	if (p.SPKeyFile == "") != (p.SPCertFile == "") {
-		return errors.New("sp_key_file and sp_cert_file go together")
+	switch {
+	case p.SPKeyFile != "" && p.SPCertFile == "":
+		pc.Errorf(path+".sp_key_file", "sp_key_file and sp_cert_file go together")
+	case p.SPKeyFile == "" && p.SPCertFile != "":
+		pc.Errorf(path+".sp_cert_file", "sp_key_file and sp_cert_file go together")
+	case p.SignRequests && p.SPKeyFile == "":
+		pc.Errorf(path+".sign_requests", "sign_requests needs sp_key_file and sp_cert_file")
 	}
-	if p.SignRequests && p.SPKeyFile == "" {
-		return errors.New("sign_requests needs sp_key_file and sp_cert_file")
-	}
-	return nil
 }

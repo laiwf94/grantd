@@ -20,8 +20,10 @@
 //
 // The configuration is reloaded on SIGHUP or POST /admin/reload.
 //
-// "wicket genkey" prints a new cookie key; "wicket gensigningkey" prints a
-// new P-256 signing key in PEM.
+// "wicket check [-online] [file]" validates a configuration without starting
+// the gateway and lists every problem with its JSON path; "wicket genkey"
+// prints a new cookie key; "wicket gensigningkey" prints a new P-256 signing
+// key in PEM.
 package main
 
 import (
@@ -55,6 +57,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "check" {
+		os.Exit(runCheck(context.Background(), os.Args[2:], os.Getenv, os.Stdout, os.Stderr))
+	}
 	if len(os.Args) > 1 {
 		if err := subcommand(os.Args[1], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "wicket:", err)
@@ -88,7 +93,7 @@ func subcommand(name string, out io.Writer) error {
 		}
 		return pem.Encode(out, &pem.Block{Type: "PRIVATE KEY", Bytes: der})
 	}
-	return fmt.Errorf("unknown command %q (commands: genkey, gensigningkey)", name)
+	return fmt.Errorf("unknown command %q (commands: check, genkey, gensigningkey)", name)
 }
 
 type settings struct {

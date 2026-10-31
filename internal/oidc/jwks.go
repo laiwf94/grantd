@@ -97,3 +97,28 @@ func find(set *jose.KeySet, kid, alg string) (jose.Key, bool) {
 	}
 	return match[0], true
 }
+
+// Probe fetches the discovery document and the signing keys now, instead
+// of on first use, so a configuration check can tell whether the provider
+// is reachable and usable. It fails when no published key can verify any
+// of the configured algorithms.
+func (p *Provider) Probe(ctx context.Context) (*Metadata, error) {
+	m, err := p.Discover(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c := p.keys
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.refresh(ctx); err != nil {
+		return nil, err
+	}
+	for _, k := range c.set.Keys {
+		for _, alg := range p.cfg.Algorithms {
+			if k.Fits(alg) {
+				return m, nil
+			}
+		}
+	}
+	return nil, fail(ReasonJWKS, "no key in %s can verify %v", redact(m.JWKSURI), p.cfg.Algorithms)
+}

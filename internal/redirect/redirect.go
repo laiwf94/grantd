@@ -155,3 +155,23 @@ func (v *Validator) Validate(raw string) (string, error) {
 	}
 	return out, nil
 }
+
+// CheckHost reports whether p is a valid allow-list entry: "host" or
+// "host:port", or with wildcard set also "*.domain[:port]". It accepts
+// exactly what New accepts.
+func CheckHost(p string, wildcard bool) error {
+	p = strings.ToLower(strings.TrimSpace(p))
+	if rest, ok := strings.CutPrefix(p, "*."); ok {
+		if !wildcard {
+			return fmt.Errorf("wildcard %q is not allowed here", p)
+		}
+		p = rest
+	}
+	if !validHostPort(p) {
+		return fmt.Errorf("invalid host %q (use host or host:port)", p)
+	}
+	return nil
+}
+
+// Canonical returns host:port in lower case, adding the implied :443.
+func Canonical(hostport string) string { return withPort(strings.ToLower(hostport)) }

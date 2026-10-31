@@ -106,6 +106,25 @@ $ docker run -p 4180:4180 -v $PWD/wicket.json:/etc/wicket.json:ro \
     -e WICKET_CONFIG=/etc/wicket.json -e WICKET_COOKIE_KEYS -e CORP_SECRET wicket
 ```
 
+Check a config before deploying it. `wicket check` validates the file the
+way startup would, without starting anything, and lists every problem with
+its JSON path and position rather than stopping at the first: unknown or
+mistyped fields, provider references, hosts that overlap between apps,
+return URLs, and the key, certificate, CA and metadata files the providers
+name. `-online` also fetches each provider's discovery document, signing
+keys and SAML metadata URL. It exits 1 on errors; warnings (an unused
+provider, an app nobody may use, a certificate about to expire) exit 0:
+
+```console
+$ ./wicket check wicket.json
+wicket.json:9:22: error: $.providers[1].sp_cert_file: other.pem is not the certificate for sp-key.pem
+wicket.json:14:5: warning: $.apps[1].allow: nobody is allowed: set any_user or list emails, email_domains or groups
+wicket.json:14:31: error: $.apps[1].hosts[0]: host "wiki.example.com:443" overlaps $.apps[0].hosts[0]: each host belongs to one app
+wicket.json: 2 errors, 1 warning (offline checks)
+$ CORP_SECRET=... ./wicket check -online wicket.json
+wicket.json: ok, 2 providers and 1 app, 0 warnings (online checks)
+```
+
 Settings that are not about identity providers or apps (listen addresses,
 keys, the session log, trusted proxies, the admin token) come from the
 environment and are listed in [cmd/wicket/main.go](cmd/wicket/main.go).
@@ -233,7 +252,7 @@ the threat model and what would change to run many replicas. Proxy
 configurations are in [docs/proxies.md](docs/proxies.md).
 
 ```text
-cmd/wicket          gateway entry point and environment configuration
+cmd/wicket          gateway entry point, environment configuration and wicket check
 cmd/fakeidp         test identity provider (OIDC + SAML) and demo certificates
 internal/server     forward-auth, login, logout, admin API, rate limiting, audit
 internal/oidc       OpenID Connect relying party: discovery, PKCE, ID tokens, JWKS cache
@@ -243,7 +262,9 @@ internal/session    server-side sessions and their append-only log
 internal/seal       AES-256-GCM cookie sealing with key rotation
 internal/policy     per-app access rules
 internal/redirect   return-URL validation
-internal/config     JSON configuration
+internal/config     JSON configuration: schema and semantic checks with JSON paths
+internal/check      offline file checks and online provider checks behind wicket check
+internal/keyfile    SP keys, certificates and CA bundles from PEM files
 internal/fakeidp    the test identity provider
 internal/metrics    Prometheus text exposition
 examples            demo script, nginx config, demo configs, a verifying upstream app

@@ -308,11 +308,35 @@ Single Logout is out of scope.
 
 ### Configuration and reload
 
-Providers and apps come from one JSON file, decoded strictly (unknown
-fields and trailing data are errors) and validated as a whole: ids, https
-URLs, durations within limits, hosts unique across apps, every app's
-providers defined, secrets present. Secrets are never in the file;
-`client_secret_env` or `client_secret_file` name where they are.
+Providers and apps come from one JSON file, decoded strictly and validated
+as a whole: ids, https URLs, durations within limits, hosts unique across
+apps, every app's providers defined, secrets present. Secrets are never in
+the file; `client_secret_env` or `client_secret_file` name where they are.
+
+Validation collects every problem instead of stopping at the first, and
+each one carries a JSON path (`$.apps[1].hosts[0]`) and a line and column.
+It runs in two passes. The schema pass walks the token stream against the
+`Config` type, so it can report what `encoding/json` hides or reports
+without a location: unknown fields (with a suggestion for a near miss),
+duplicate keys, field names in the wrong case (which `encoding/json` would
+silently accept), wrong types, bad durations, trailing data. It drops
+those values and hands the rest to the semantic pass, which checks the
+meaning: provider references, hosts that overlap once `host` and
+`host:443` are seen as the same origin, host syntax exactly as the return
+URL validator parses it, each app's `default_url` against the same
+validator a login's `rd` goes through, client authentication against the
+secret, scopes and algorithms. Things that are allowed but probably wrong
+(an unused provider, an app with no allow rule, a provider listed twice)
+are warnings and never stop a load.
+
+Startup, reload and `wicket check` share that code, so the checker can't
+pass a file the gateway would refuse. `wicket check` adds what startup only
+finds when it builds the runtime: it reads the CA bundles, SP keys and
+certificates (key size, the certificate matching the key, expiry) and SAML
+metadata files, and with `-online` it fetches each provider's discovery
+document and signing keys (at least one must fit the allowed algorithms)
+and SAML metadata URL, with a time limit per provider and the providers
+checked in parallel.
 
 A reload (`SIGHUP` or `POST /admin/reload`) builds a complete new runtime
 (provider clients, SAML metadata, compiled policies, redirect allow-list)

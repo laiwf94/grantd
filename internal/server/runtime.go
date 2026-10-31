@@ -5,8 +5,6 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/pem"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -15,6 +13,7 @@ import (
 	"time"
 
 	"github.com/laiwf94/wicket/internal/config"
+	"github.com/laiwf94/wicket/internal/keyfile"
 	"github.com/laiwf94/wicket/internal/oidc"
 	"github.com/laiwf94/wicket/internal/policy"
 	"github.com/laiwf94/wicket/internal/redirect"
@@ -115,13 +114,9 @@ func providerClient(pc *config.Provider, o buildOptions) (*http.Client, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	if pc.CAFile != "" {
-		pemBytes, err := os.ReadFile(pc.CAFile)
+		pool, _, err := keyfile.CAPool(pc.CAFile)
 		if err != nil {
 			return nil, fmt.Errorf("ca_file: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pemBytes) {
-			return nil, errors.New("ca_file holds no PEM certificates")
 		}
 		// The file replaces the system roots: the provider is pinned to
 		// the private CA.
@@ -148,14 +143,8 @@ func buildSAML(ctx context.Context, cfg *config.Config, pc *config.Provider, cli
 	var key *rsa.PrivateKey
 	var cert *x509.Certificate
 	if pc.SPKeyFile != "" {
-		if key, err = readRSAKey(pc.SPKeyFile); err != nil {
-			return nil, fmt.Errorf("sp_key_file: %w", err)
-		}
-		if cert, err = readCert(pc.SPCertFile); err != nil {
-			return nil, fmt.Errorf("sp_cert_file: %w", err)
-		}
-		if pub, ok := cert.PublicKey.(*rsa.PublicKey); !ok || !pub.Equal(&key.PublicKey) {
-			return nil, errors.New("sp_cert_file does not match sp_key_file")
+		if key, cert, err = keyfile.KeyPair(pc.SPKeyFile, pc.SPCertFile); err != nil {
+			return nil, fmt.Errorf("sp_key_file, sp_cert_file: %w", err)
 		}
 	}
 	entityID := pc.EntityID
@@ -175,50 +164,6 @@ func buildSAML(ctx context.Context, cfg *config.Config, pc *config.Provider, cli
 		EmailAttr: emailAttr, NameAttr: pc.NameAttribute, GroupsAttr: groupsAttr, Skew: skew, Now: o.now,
 		Replay: o.replay,
 	})
-}
-
-func readPEM(path, want string) ([]byte, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	for {
-		var blk *pem.Block
-		blk, b = pem.Decode(b)
-		if blk == nil {
-			return nil, fmt.Errorf("no %s PEM block", want)
-		}
-		if strings.HasSuffix(blk.Type, want) {
-			return blk.Bytes, nil
-		}
-	}
-}
-
-func readRSAKey(path string) (*rsa.PrivateKey, error) {
-	der, err := readPEM(path, "PRIVATE KEY")
-	if err != nil {
-		return nil, err
-	}
-	if k, err := x509.ParsePKCS1PrivateKey(der); err == nil {
-		return k, nil
-	}
-	k, err := x509.ParsePKCS8PrivateKey(der)
-	if err != nil {
-		return nil, err
-	}
-	rk, ok := k.(*rsa.PrivateKey)
-	if !ok {
-		return nil, errors.New("not an RSA key")
-	}
-	return rk, nil
-}
-
-func readCert(path string) (*x509.Certificate, error) {
-	der, err := readPEM(path, "CERTIFICATE")
-	if err != nil {
-		return nil, err
-	}
-	return x509.ParseCertificate(der)
 }
 
 // appFor finds the app by explicit id, or else by host.

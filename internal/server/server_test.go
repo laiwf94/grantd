@@ -780,10 +780,4 @@ func TestRuntimeBuildErrors(t *testing.T) {
 	if _, err := buildRuntime(ctx, c, buildOptions{now: time.Now}); err == nil {
 		t.Error("CA file without certificates")
 	}
-	if _, err := readRSAKey(dir + "/empty.pem"); err == nil {
-		t.Error("key without PEM")
-	}
-	if _, err := readCert(dir + "/missing.pem"); err == nil {
-		t.Error("missing cert")
-	}
 }
