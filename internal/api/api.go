@@ -437,7 +437,7 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if body.Limit < 0 || body.Limit > store.MaxReadLimit {
-		return badRequest("limit must be between 1 and %d", store.MaxReadLimit)
+		return badRequest("limit must be between 0 and %d (0 uses the default of %d)", store.MaxReadLimit, store.DefaultReadLimit)
 	}
 	if len(body.Cursor) > 1024 {
 		return badRequest("cursor is too long")
@@ -566,7 +566,7 @@ func (s *Server) lookup(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if body.Limit < 0 || body.Limit > check.MaxLookupLimit {
-		return badRequest("limit must be between 1 and %d", check.MaxLookupLimit)
+		return badRequest("limit must be between 0 and %d (0 uses the default of %d)", check.MaxLookupLimit, check.DefaultLookupLimit)
 	}
 	if body.Cursor != "" && !store.ValidID(body.Cursor) {
 		return badRequest("cursor is not valid")

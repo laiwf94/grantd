@@ -452,3 +452,24 @@ func TestConcurrentWritesAndChecks(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestLimitErrorMentionsZeroDefault(t *testing.T) {
+	h := newHarness(t, 0)
+	h.setup()
+	for _, c := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/v1/relationships/read", map[string]any{"filter": map[string]string{"resource_type": "doc"}}},
+		{"/v1/lookup/resources", map[string]any{"resource_type": "doc", "permission": "view", "subject": "user:x"}},
+	} {
+		c.body["limit"] = 0
+		h.ok("POST", c.path, c.body)
+		c.body["limit"] = -1
+		code, out := h.call("POST", c.path, c.body)
+		msg, _ := out["error"].(map[string]any)["message"].(string)
+		if code != 400 || !strings.Contains(msg, "between 0 and") || !strings.Contains(msg, "default") {
+			t.Errorf("%s: got %d %q", c.path, code, msg)
+		}
+	}
+}
