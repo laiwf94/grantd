@@ -74,6 +74,22 @@ rules only, so odd input fails closed. Unknown keywords are errors, every
 decision names the rule that made it, and the file is hot-reloaded
 atomically; an invalid file is rejected and the old policy keeps running.
 
+A policy can be tested like code. A case file lists calls and tool lists with
+the decision each should get, and `toolgate policy test POLICY CASES` checks
+them all and prints, for each case that fails, what it expected next to what
+the policy decided:
+
+```console
+$ toolgate policy test narrowed.json examples/policy_cases.json
+FAIL alice reads a note
+     decision: want allow
+                got deny
+     rule:     want read-workspace
+                got default-deny
+     decided: deny by default-deny (arguments rejected by read-workspace): arguments rejected by rule read-workspace: $.path: path is outside the allowed directories
+FAIL 17 cases: 16 passed, 1 failed
+```
+
 Rules marked `requires_approval` park the call until an administrator approves
 or denies it on a separate admin API. A grant is bound to the agent, the tool
 and the SHA-256 of the exact arguments, works once and expires. The agent's
@@ -137,7 +153,8 @@ Then point any MCP client at `http://127.0.0.1:8080/mcp` with
 `Authorization: Bearer <agent key>`. Configuration is documented in
 [cmd/toolgate/main.go](cmd/toolgate/main.go); the config and policy formats in
 [examples/config.json](examples/config.json) and
-[examples/policy.json](examples/policy.json).
+[examples/policy.json](examples/policy.json), with its test cases in
+[examples/policy_cases.json](examples/policy_cases.json).
 
 The Docker image holds both binaries, runs as `nonroot` on distroless, and
 keeps the audit log and tool pins in `/data`. In this example the fake
@@ -199,11 +216,12 @@ Admin errors look like
 | Area | Test |
 |---|---|
 | Policy decisions | Random policies (wildcards, scopes, deny rules with and without argument schemas, path prefixes) and random calls are checked against an independent, naive reference evaluator, for both `Evaluate` and the `tools/list` filter. Breaking the engine on purpose (ignoring scopes, dropping `*` upstream rules from the index, ignoring deny-rule schemas, hiding tools on conditional denies) makes it fail. |
+| Policy cases | The case parser is strict (unknown fields, duplicate keys and names, expectations that cannot apply are errors); a case written from the engine's own answer passes and the same case with the decision flipped fails on that field; the example cases run against the example policy in CI. |
 | Rate limiting | Random schedules against an exact integer token-bucket reference; the GCRA limiter must admit exactly the same calls. |
 | Audit log | Every single-byte flip is detected (by `Verify` or by the head hash); the log cut at every byte offset recovers exactly the complete records and the chain continues; edits, deletions, swaps and duplicates are reported at the right line; failed writes and fsyncs are injected. |
 | End to end | A real gateway in front of a real MCP server over HTTP: filtered lists, credential injection, every denial path, rate limits, quotas, approval (including concurrent waiters, single use, denial), rug-pull quarantine and re-approval, redaction, truncation, upstream timeouts, oversized and malformed upstream replies, a down upstream, policy hot reload, signed tokens, legacy sessions and session hijack attempts, audit failure refusing calls. The binary itself is restarted with its state to check that pins and the audit chain survive. |
 | Protocol | Every transport rule of both protocol eras over HTTP (headers, `_meta`, versions, Origin, Accept, body limit, batches, sessions); the client against a modern server, a hand-written 2025-era server with SSE, pagination and expiring sessions, and a set of misbehaving servers. |
-| Parsers | Go fuzzing of the JSON-RPC decoder, the policy parser, the schema compiler and validator, the token verifier and the audit log reader. |
+| Parsers | Go fuzzing of the JSON-RPC decoder, the policy parser, the policy case parser and runner, the schema compiler and validator, the token verifier and the audit log reader. |
 | Concurrency | The whole suite runs under the race detector in CI. |
 
 ```console
@@ -242,7 +260,7 @@ cmd/mcpfake          a small MCP server to put behind the gateway
 internal/gateway     the enforcement pipeline, upstream tool caching, admin API, configuration
 internal/mcp         MCP over Streamable HTTP: dual-era server, client, header rules
 internal/jsonrpc     strict JSON-RPC 2.0 decoding and encoding
-internal/policy      policy parsing, evaluation, hot reload
+internal/policy      policy parsing, evaluation, hot reload, test cases
 internal/schema      the argument-constraint schema subset
 internal/identity    static keys and signed tokens
 internal/ratelimit   GCRA buckets, daily quotas, upstream concurrency

@@ -166,6 +166,35 @@ in force, and the rejection is audited once; the next good write is picked up.
 Replacing the file by rename avoids the noise. Every audit record carries the hash of
 the policy that decided it.
 
+A policy ships with a case file of expectations, checked by
+`toolgate policy test` in CI:
+
+```json
+{"version": 1, "cases": [
+  {"name": "alice reads a report", "subject": {"agent": "alice-bot", "scopes": ["files:read"]},
+   "call": {"tool": "fake.read_file", "arguments": {"path": "reports/q1.txt"}},
+   "expect": {"decision": "allow", "rule": "read-workspace", "requires_approval": false}},
+  {"name": "bob cannot read files", "subject": {"agent": "bob-bot"},
+   "call": {"tool": "fake.read_file", "arguments": {"path": "reports/q1.txt"}},
+   "expect": {"decision": "deny", "rule": "default-deny", "hidden": true}},
+  {"name": "bob sees only echo", "subject": {"agent": "bob-bot"},
+   "list": ["fake.echo", "fake.read_file"], "expect": {"visible": ["fake.echo"]}}
+]}
+```
+
+A call case runs `Evaluate` exactly as the gateway does (arguments decoded
+with the same JSON rules, tool names split at the first dot) and must expect
+a decision; `rule`, `constraint_rule`, `requires_approval`, `reason_contains`
+and `hidden` (answered "Unknown tool" rather than "denied") are checked when
+given. A list case names the tools an upstream offers and expects exactly the
+ones the `tools/list` filter shows. The parser is as strict as the policy
+parser: an unknown field, a duplicate key or case name, or an expectation that
+cannot apply (`hidden` on an allow, `visible` on a call) is an error, because
+a misspelt expectation that is silently ignored is a test that always
+passes. A case naming a rule the policy does not define fails, so renaming a
+rule cannot leave cases checking nothing. The command exits 1 when a case
+fails and 2 when a file does not parse.
+
 Rules are indexed by upstream at compile time (rules
 naming `"*"` are merged into each upstream's list in file order), so a
 decision scans only rules that can apply. A 200-rule policy decides in about

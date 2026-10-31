@@ -3,6 +3,7 @@
 //
 //	toolgate                                  run the gateway (configured from the environment)
 //	toolgate audit verify [-head HASH] FILE   check an audit log's hash chain
+//	toolgate policy test [-v] POLICY CASES    check a policy against a file of expected decisions
 //	toolgate token new                        print a new static agent key and its SHA-256 for the config
 //	toolgate token hash < key                 print the SHA-256 of a static key read from stdin
 //	toolgate token mint -sub ID [-owner NAME] [-scope "a b"] [-ttl 15m]
@@ -69,10 +70,12 @@ func cli(ctx context.Context, args []string, getenv func(string) string, stdin i
 		err = run(ctx, getenv, stdout, ready)
 	case args[0] == "audit" && len(args) > 1 && args[1] == "verify":
 		return auditVerify(args[2:], stdout, stderr)
+	case args[0] == "policy" && len(args) > 1 && args[1] == "test":
+		return policyTest(args[2:], stdout, stderr)
 	case args[0] == "token" && len(args) > 1:
 		err = token(args[1], args[2:], getenv, stdin, stdout)
 	default:
-		err = errors.New("usage: toolgate [serve] | audit verify [-head HASH] FILE | token new|hash|mint")
+		err = errors.New("usage: toolgate [serve] | audit verify [-head HASH] FILE | policy test [-v] POLICY CASES | token new|hash|mint")
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, "toolgate:", err)
@@ -353,6 +356,60 @@ func auditVerify(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "OK %s: %d records, head %s\n", fs.Arg(0), res.Records, res.Head)
 	return 0
+}
+
+// policyTest runs a case file against a policy. It exits 0 when every case
+// passes, 1 when any fails and 2 when either file cannot be read or parsed.
+func policyTest(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("policy test", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	verbose := fs.Bool("v", false, "also list the cases that pass")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 2 {
+		fmt.Fprintln(stderr, "usage: toolgate policy test [-v] POLICY CASES")
+		return 2
+	}
+	src, err := readLimited(fs.Arg(0), policy.MaxBytes)
+	if err != nil {
+		fmt.Fprintln(stderr, "toolgate:", err)
+		return 2
+	}
+	p, err := policy.Parse(src)
+	if err != nil {
+		fmt.Fprintf(stderr, "toolgate: %s: %v\n", fs.Arg(0), err)
+		return 2
+	}
+	if src, err = readLimited(fs.Arg(1), policy.MaxCaseBytes); err != nil {
+		fmt.Fprintln(stderr, "toolgate:", err)
+		return 2
+	}
+	cs, err := policy.ParseCases(src)
+	if err != nil {
+		fmt.Fprintf(stderr, "toolgate: %s: %v\n", fs.Arg(1), err)
+		return 2
+	}
+	rep := policy.RunCases(p, cs)
+	rep.WriteText(stdout, *verbose)
+	if rep.Failed > 0 {
+		return 1
+	}
+	return 0
+}
+
+// readLimited reads a file, refusing one larger than limit bytes.
+func readLimited(path string, limit int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	src, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(src) > limit {
+		return nil, fmt.Errorf("%s is larger than %d bytes", path, limit)
+	}
+	return src, nil
 }
 
 func token(sub string, args []string, getenv func(string) string, stdin io.Reader, stdout io.Writer) error {

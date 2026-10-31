@@ -29,8 +29,11 @@ jobs:
           go test ./internal/jsonrpc -run=^$ -fuzz=FuzzDecode -fuzztime=20s
           go test ./internal/schema -run=^$ -fuzz=FuzzCompileValidate -fuzztime=20s
           go test ./internal/policy -run=^$ -fuzz=FuzzParse -fuzztime=20s
+          go test ./internal/policy -run=^$ -fuzz=FuzzCases -fuzztime=20s
           go test ./internal/identity -run=^$ -fuzz=FuzzAuthenticate -fuzztime=20s
           go test ./internal/audit -run=^$ -fuzz=FuzzVerify -fuzztime=20s
+      - name: Policy cases
+        run: go run ./cmd/toolgate policy test examples/policy.json examples/policy_cases.json
       - name: Demo
         run: ./examples/demo.sh
       - name: Vulnerabilities

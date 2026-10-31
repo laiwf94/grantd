@@ -19,6 +19,7 @@ import (
 
 	"github.com/laiwf94/toolgate/internal/fakeserver"
 	"github.com/laiwf94/toolgate/internal/identity"
+	"github.com/laiwf94/toolgate/internal/policy"
 )
 
 const (
@@ -271,6 +272,64 @@ func TestAuditVerifyCommand(t *testing.T) {
 	var logs bytes.Buffer
 	if code := cli(context.Background(), nil, s.getenv, nil, &logs, &logs, nil); code != 1 || !strings.Contains(logs.String(), "failed verification") {
 		t.Fatalf("started on a tampered log: %s", logs.String())
+	}
+}
+
+func TestPolicyTestCommand(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	run := func(args ...string) (int, string, string) {
+		var out, errOut bytes.Buffer
+		code := cli(context.Background(), append([]string{"policy", "test"}, args...), nil, nil, &out, &errOut, nil)
+		return code, out.String(), errOut.String()
+	}
+	pol, cases := filepath.Join("..", "..", "examples", "policy.json"), filepath.Join("..", "..", "examples", "policy_cases.json")
+	if code, out, errOut := run(pol, cases); code != 0 || !strings.HasPrefix(out, "PASS ") || errOut != "" {
+		t.Fatalf("example cases: %d %q %q", code, out, errOut)
+	}
+	if code, out, _ := run("-v", pol, cases); code != 0 || !strings.Contains(out, "ok   alice reads a report\n") {
+		t.Fatalf("verbose: %d %s", code, out)
+	}
+
+	// Narrowing read-workspace to reports breaks the notes case, and the
+	// report says which case, what was expected and what was decided.
+	src, err := os.ReadFile(pol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	narrowed := strings.Replace(string(src), `"x-path-prefix": ["reports", "notes"]`, `"x-path-prefix": ["reports"]`, 1)
+	if narrowed == string(src) {
+		t.Fatal("example policy changed; update this test")
+	}
+	code, out, _ := run(write("narrow.json", narrowed), cases)
+	if code != 1 || !strings.Contains(out, "FAIL alice reads a note\n     decision: want allow\n                got deny\n") ||
+		!strings.Contains(out, "path is outside the allowed directories") || !strings.Contains(out, "1 failed") {
+		t.Fatalf("narrowed policy: %d\n%s", code, out)
+	}
+
+	if code, _, errOut := run(pol); code != 2 || !strings.Contains(errOut, "usage") {
+		t.Fatalf("usage: %d %s", code, errOut)
+	}
+	if code, _, _ := run(filepath.Join(dir, "missing"), cases); code != 2 {
+		t.Fatal("missing policy")
+	}
+	if code, _, _ := run(pol, filepath.Join(dir, "missing")); code != 2 {
+		t.Fatal("missing cases")
+	}
+	if code, _, errOut := run(write("bad.json", `{"version":1,"rules":[{"id":"x"}]}`), cases); code != 2 || !strings.Contains(errOut, "bad.json") {
+		t.Fatalf("invalid policy: %d %s", code, errOut)
+	}
+	if code, _, errOut := run(pol, write("badcases.json", `{"version":1,"cases":[],"x":1}`)); code != 2 || !strings.Contains(errOut, "badcases.json") {
+		t.Fatalf("invalid cases: %d %s", code, errOut)
+	}
+	if code, _, errOut := run(pol, write("huge.json", strings.Repeat(" ", policy.MaxCaseBytes+1))); code != 2 || !strings.Contains(errOut, "larger than") {
+		t.Fatalf("oversized cases: %d %s", code, errOut)
 	}
 }
 
