@@ -108,6 +108,7 @@ func TestParseErrors(t *testing.T) {
 		{"definition a { relation x: a relation x: a }", "declared twice"},
 		{"definition a { relation x: a permission x = x }", "declared twice"},
 		{"definition a { relation x: b }", `unknown type "b"`},
+		{"definition a { permission p = r->x\n relation r: b }", `a#r allows unknown type "b"`},
 		{"definition a { relation x: a#nope }", `has no relation or permission "nope"`},
 		{"definition a { relation x: a | a }", "listed twice"},
 		{"definition a { permission p = q }", `refers to "q"`},

@@ -407,7 +407,13 @@ func validateExpr(s *Schema, d *Definition, perm string, e Expr) error {
 			if a.Relation != "" || a.Wildcard {
 				return &Error{Msg: fmt.Sprintf("%s#%s: %s follows %s#%s, which allows %s; arrows need plain object types", d.Name, perm, e, d.Name, r.Name, a)}
 			}
-			if !s.Defs[a.Type].Has(e.Computed) {
+			target, ok := s.Defs[a.Type]
+			if !ok {
+				// The relation is checked again in declaration order, but a
+				// permission declared before it reaches here first.
+				return &Error{Msg: fmt.Sprintf("%s#%s allows unknown type %q", d.Name, r.Name, a.Type)}
+			}
+			if !target.Has(e.Computed) {
 				return &Error{Msg: fmt.Sprintf("%s#%s: %s reaches type %q, which has no relation or permission %q", d.Name, perm, e, a.Type, e.Computed)}
 			}
 		}

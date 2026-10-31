@@ -1,0 +1,2 @@
+go test fuzz v1
+string("definition user{}definition group{relation member:group#member}definition folder{relation a:folder relation viewer:user|group#member permission b=viewer&r->a relation r:a}")
