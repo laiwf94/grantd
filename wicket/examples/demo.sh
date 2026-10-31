@@ -8,6 +8,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MODULE="$(cd "$ROOT/.." && pwd)" # the Go module root, which builds the binaries
 WORK="$(mktemp -d)"
 NGINX_IMAGE="nginx:1.27.3-alpine"
 export DEMO_CLIENT_SECRET="demo-client-secret-0123456789"
@@ -65,7 +66,7 @@ wait_for() { # url
 }
 
 step "Build wicket, fakeidp and whoami; generate a throwaway CA and keys"
-(cd "$ROOT" && go build -o "$WORK/bin/" ./cmd/wicket ./cmd/fakeidp ./examples/whoami)
+(cd "$MODULE" && go build -o "$WORK/bin/" ./cmd/wicket ./cmd/fakeidp ./examples/whoami)
 "$WORK/bin/fakeidp" gencert -dir "$WORK/certs" -hosts localhost,127.0.0.1,host.docker.internal
 chmod 644 "$WORK/certs/tls.pem" "$WORK/certs/tls-key.pem" # readable by nginx in the container
 cp "$ROOT/examples/wicket.json" "$ROOT/examples/fakeidp.json" "$WORK/"

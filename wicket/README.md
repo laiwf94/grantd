@@ -93,9 +93,9 @@ All demo steps passed.
 To run it with your own config:
 
 ```console
-$ go build ./cmd/wicket
-$ export WICKET_COOKIE_KEYS=$(./wicket genkey) CORP_SECRET=...
-$ WICKET_CONFIG=wicket.json ./wicket
+$ go build -o wicketd ./cmd/wicket     # from the repository root
+$ export WICKET_COOKIE_KEYS=$(./wicketd genkey) CORP_SECRET=...
+$ WICKET_CONFIG=wicket.json ./wicketd
 ```
 
 Or with Docker (distroless, non-root):
@@ -127,7 +127,7 @@ wicket.json: ok, 2 providers and 1 app, 0 warnings (online checks)
 
 Settings that are not about identity providers or apps (listen addresses,
 keys, the session log, trusted proxies, the admin token) come from the
-environment and are listed in [cmd/wicket/main.go](cmd/wicket/main.go).
+environment and are listed in [cmd/wicket/main.go](../cmd/wicket/main.go).
 
 ## Endpoints
 
@@ -219,8 +219,8 @@ session, with idle- and absolute-expired sessions, with a forged logout token
 (which must not even clear the cookie), and with cross-origin logout.
 
 ```console
-$ go test -race ./...
-$ go test -run=^$ -bench=. ./internal/...
+$ go test -race ./internal/authn/... ./cmd/wicket ./cmd/fakeidp   # from the repository root
+$ go test -run=^$ -bench=. ./internal/authn/...
 ```
 
 ## Benchmarks
@@ -252,23 +252,23 @@ the threat model and what would change to run many replicas. Proxy
 configurations are in [docs/proxies.md](docs/proxies.md).
 
 ```text
-cmd/wicket          gateway entry point, environment configuration and wicket check
-cmd/fakeidp         test identity provider (OIDC + SAML) and demo certificates
-internal/server     forward-auth, login, logout, admin API, rate limiting, audit
-internal/oidc       OpenID Connect relying party: discovery, PKCE, ID tokens, JWKS cache
-internal/saml       SAML service provider: requests, metadata, response validation, decryption
-internal/jose       JWS/JWK/JWT verification and ES256 signing
-internal/session    server-side sessions and their append-only log
-internal/seal       AES-256-GCM cookie sealing with key rotation
-internal/policy     per-app access rules
-internal/redirect   return-URL validation
-internal/config     JSON configuration: schema and semantic checks with JSON paths
-internal/check      offline file checks and online provider checks behind wicket check
-internal/keyfile    SP keys, certificates and CA bundles from PEM files
-internal/fakeidp    the test identity provider
-internal/metrics    Prometheus text exposition
-examples            demo script, nginx config, demo configs, a verifying upstream app
-docs                design notes and proxy configurations
+cmd/wicket                gateway entry point, environment configuration and wicket check
+cmd/fakeidp               test identity provider (OIDC + SAML) and demo certificates
+internal/authn/server     forward-auth, login, logout, admin API, rate limiting, audit
+internal/authn/oidc       OpenID Connect relying party: discovery, PKCE, ID tokens, JWKS cache
+internal/authn/saml       SAML service provider: requests, metadata, response validation, decryption
+internal/authn/jose       JWS/JWK/JWT verification and ES256 signing
+internal/authn/session    server-side sessions and their append-only log
+internal/authn/seal       AES-256-GCM cookie sealing with key rotation
+internal/authn/policy     per-app access rules
+internal/authn/redirect   return-URL validation
+internal/authn/config     JSON configuration: schema and semantic checks with JSON paths
+internal/authn/check      offline file checks and online provider checks behind wicket check
+internal/authn/keyfile    SP keys, certificates and CA bundles from PEM files
+internal/authn/fakeidp    the test identity provider
+internal/authn/metrics    Prometheus text exposition
+examples (wicket/), examples/whoami  demo script, nginx config, demo configs, a verifying upstream app
+docs (wicket/)            design notes and proxy configurations
 ```
 
 ## License

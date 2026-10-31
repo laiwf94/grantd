@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# Build from the repository root: docker build -f wicket/Dockerfile .
 FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
