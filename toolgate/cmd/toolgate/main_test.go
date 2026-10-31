@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/laiwf94/toolgate/internal/fakeserver"
-	"github.com/laiwf94/toolgate/internal/identity"
-	"github.com/laiwf94/toolgate/internal/policy"
+	"github.com/laiwf94/grantd/internal/agents/fakeserver"
+	"github.com/laiwf94/grantd/internal/agents/identity"
+	"github.com/laiwf94/grantd/internal/agents/policy"
 )
 
 const (

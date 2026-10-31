@@ -24,7 +24,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/laiwf94/toolgate/internal/fakeserver"
+	"github.com/laiwf94/grantd/internal/agents/fakeserver"
 )
 
 func main() {

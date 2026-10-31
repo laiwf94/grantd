@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1
+# toolgate is part of the root module; build from the repository root:
+#   docker build -f toolgate/Dockerfile .
 FROM golang:1.27-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/toolgate ./cmd/toolgate \
- && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/mcpfake ./cmd/mcpfake \
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/toolgate ./toolgate/cmd/toolgate \
+ && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/mcpfake ./toolgate/cmd/mcpfake \
  && mkdir -p /out/data
 
 FROM gcr.io/distroless/static-debian12:nonroot

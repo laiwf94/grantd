@@ -225,8 +225,8 @@ Admin errors look like
 | Concurrency | The whole suite runs under the race detector in CI. |
 
 ```console
-$ go test -race ./...                  # full suite, 96% statement coverage
-$ go test -run=^$ -bench=. ./internal/...
+$ go test -race ./internal/agents/... ./toolgate/...   # full suite, 96% statement coverage
+$ go test -run=^$ -bench=. ./internal/agents/...
 ```
 
 The benchmark figures below are from an Apple M4 Max. Durability dominates:
@@ -252,25 +252,28 @@ runs; the in-memory steps are stable.
 The design notes in [docs/DESIGN.md](docs/DESIGN.md) cover the threat model,
 the order of checks, the policy semantics, approvals, rug-pull detection, the
 audit log format, how both MCP protocol eras are served, failure modes, limits
-and what would change to run it as a fleet. The code is organised like this:
+and what would change to run it as a fleet. toolgate is part of the authz
+module: its packages live in the repository root under `internal/agents/`,
+and its commands stay under `toolgate/cmd/` until they become `authz mcp` and
+`authz mcpfake`. Paths below are relative to the repository root:
 
 ```text
-cmd/toolgate         gateway entry point, `audit verify` and `token` subcommands
-cmd/mcpfake          a small MCP server to put behind the gateway
-internal/gateway     the enforcement pipeline, upstream tool caching, admin API, configuration
-internal/mcp         MCP over Streamable HTTP: dual-era server, client, header rules
-internal/jsonrpc     strict JSON-RPC 2.0 decoding and encoding
-internal/policy      policy parsing, evaluation, hot reload, test cases
-internal/schema      the argument-constraint schema subset
-internal/identity    static keys and signed tokens
-internal/ratelimit   GCRA buckets, daily quotas, upstream concurrency
-internal/approval    human approval requests and single-use grants
-internal/pins        tool definition pinning and quarantine
-internal/guard       output redaction, truncation and audit previews
-internal/audit       hash-chained audit log and verification
-internal/fakeserver  the tools behind cmd/mcpfake
-internal/httpx       request IDs, logging, metrics, errors
-internal/metrics     Prometheus text exposition
+toolgate/cmd/toolgate          gateway entry point, `audit verify` and `token` subcommands
+toolgate/cmd/mcpfake           a small MCP server to put behind the gateway
+internal/agents/gateway        the enforcement pipeline, upstream tool caching, admin API, configuration
+internal/agents/mcp            MCP over Streamable HTTP: dual-era server, client, header rules
+internal/agents/jsonrpc        strict JSON-RPC 2.0 decoding and encoding
+internal/agents/policy         policy parsing, evaluation, hot reload, test cases
+internal/agents/schema         the argument-constraint schema subset
+internal/agents/identity       static keys and signed tokens
+internal/agents/ratelimit      GCRA buckets, daily quotas, upstream concurrency
+internal/agents/approval       human approval requests and single-use grants
+internal/agents/pins           tool definition pinning and quarantine
+internal/agents/guard          output redaction, truncation and audit previews
+internal/agents/audit          hash-chained audit log and verification
+internal/agents/fakeserver     the tools behind toolgate/cmd/mcpfake
+internal/agents/httpx          request IDs, logging, metrics, errors
+internal/agents/metrics        Prometheus text exposition
 ```
 
 ## License

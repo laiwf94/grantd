@@ -8,36 +8,37 @@ on:
 permissions:
   contents: read
 
+# toolgate's packages live in the root module under internal/agents, with its
+# commands still under toolgate/cmd until they become `authz mcp` and
+# `authz mcpfake`. This job keeps toolgate's own gate (fuzz targets, policy
+# cases and the demo) running from the repository root.
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: toolgate
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: toolgate/go.mod
+          go-version-file: go.mod
       - name: Format
-        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+        run: test -z "$(gofmt -l internal/agents toolgate)" || (gofmt -l internal/agents toolgate && exit 1)
       - name: Vet
-        run: go vet ./...
+        run: go vet ./internal/agents/... ./toolgate/...
       - name: Test (race, coverage)
-        run: go test -race -coverprofile=coverage.out ./...
+        run: go test -race -coverprofile=coverage.out ./internal/agents/... ./toolgate/...
       - name: Coverage
         run: go tool cover -func=coverage.out | tail -1
       - name: Fuzz (short)
         run: |
-          go test ./internal/jsonrpc -run=^$ -fuzz=FuzzDecode -fuzztime=20s
-          go test ./internal/schema -run=^$ -fuzz=FuzzCompileValidate -fuzztime=20s
-          go test ./internal/policy -run=^$ -fuzz=FuzzParse -fuzztime=20s
-          go test ./internal/policy -run=^$ -fuzz=FuzzCases -fuzztime=20s
-          go test ./internal/identity -run=^$ -fuzz=FuzzAuthenticate -fuzztime=20s
-          go test ./internal/audit -run=^$ -fuzz=FuzzVerify -fuzztime=20s
+          go test ./internal/agents/jsonrpc -run=^$ -fuzz=FuzzDecode -fuzztime=20s
+          go test ./internal/agents/schema -run=^$ -fuzz=FuzzCompileValidate -fuzztime=20s
+          go test ./internal/agents/policy -run=^$ -fuzz=FuzzParse -fuzztime=20s
+          go test ./internal/agents/policy -run=^$ -fuzz=FuzzCases -fuzztime=20s
+          go test ./internal/agents/identity -run=^$ -fuzz=FuzzAuthenticate -fuzztime=20s
+          go test ./internal/agents/audit -run=^$ -fuzz=FuzzVerify -fuzztime=20s
       - name: Policy cases
-        run: go run ./cmd/toolgate policy test examples/policy.json examples/policy_cases.json
+        run: go run ./toolgate/cmd/toolgate policy test toolgate/examples/policy.json toolgate/examples/policy_cases.json
       - name: Demo
-        run: ./examples/demo.sh
+        run: ./toolgate/examples/demo.sh
       - name: Vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./internal/agents/... ./toolgate/...

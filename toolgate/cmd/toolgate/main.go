@@ -46,12 +46,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/laiwf94/toolgate/internal/audit"
-	"github.com/laiwf94/toolgate/internal/gateway"
-	"github.com/laiwf94/toolgate/internal/identity"
-	"github.com/laiwf94/toolgate/internal/metrics"
-	"github.com/laiwf94/toolgate/internal/pins"
-	"github.com/laiwf94/toolgate/internal/policy"
+	"github.com/laiwf94/grantd/internal/agents/audit"
+	"github.com/laiwf94/grantd/internal/agents/gateway"
+	"github.com/laiwf94/grantd/internal/agents/identity"
+	"github.com/laiwf94/grantd/internal/agents/metrics"
+	"github.com/laiwf94/grantd/internal/agents/pins"
+	"github.com/laiwf94/grantd/internal/agents/policy"
 )
 
 func main() {
