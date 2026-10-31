@@ -1,0 +1,21 @@
+{
+  "issuer": "https://localhost:9443",
+  "clients": [
+    {
+      "id": "wicket-demo",
+      "secret_env": "DEMO_CLIENT_SECRET",
+      "redirect_uris": ["https://localhost:8443/_wicket/callback/corp"],
+      "post_logout_redirect_uris": ["https://localhost:8443/_wicket/logged-out"]
+    }
+  ],
+  "service_providers": [
+    {
+      "entity_id": "https://localhost:8443/_wicket/saml/partner/metadata",
+      "acs_url": "https://localhost:8443/_wicket/saml/partner/acs",
+      "sign_response": true,
+      "sign_assertion": true,
+      "encrypt_cert_file": "certs/sp.pem",
+      "request_cert_file": "certs/sp.pem"
+    }
+  ]
+}
