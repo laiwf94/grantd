@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "no-dotenv",
+      "description": "Nobody reads .env files, whatever the other rules say.",
+      "effect": "deny",
+      "agents": ["*"],
+      "upstreams": ["*"],
+      "tools": ["read_file"],
+      "arguments": {"required": ["path"], "properties": {"path": {"pattern": "(^|/)\\.env$"}}}
+    },
+    {
+      "id": "read-workspace",
+      "description": "Agents with files:read may read reports and notes; results are scrubbed of AWS keys.",
+      "effect": "allow",
+      "scopes": ["files:read"],
+      "upstreams": ["fake"],
+      "tools": ["read_file"],
+      "arguments": {
+        "type": "object",
+        "required": ["path"],
+        "additionalProperties": false,
+        "properties": {"path": {"type": "string", "maxLength": 256, "x-path-prefix": ["reports", "notes"]}}
+      },
+      "output": {"redact": ["aws_access_key_id", "private_key", "github_token"], "max_bytes": 8192}
+    },
+    {
+      "id": "echo",
+      "effect": "allow",
+      "agents": ["*"],
+      "upstreams": ["fake"],
+      "tools": ["echo"]
+    },
+    {
+      "id": "web-allowlist",
+      "description": "alice-bot may fetch from example.com only.",
+      "effect": "allow",
+      "agents": ["alice-bot"],
+      "upstreams": ["fake"],
+      "tools": ["http_get"],
+      "arguments": {
+        "type": "object",
+        "required": ["url"],
+        "additionalProperties": false,
+        "properties": {"url": {"type": "string", "x-allowed-hosts": ["example.com", "www.example.com"]}}
+      }
+    },
+    {
+      "id": "translate-needs-approval",
+      "description": "Translation leaves the building, so a human approves each call.",
+      "effect": "allow",
+      "agents": ["alice-bot"],
+      "upstreams": ["fake"],
+      "tools": ["translate"],
+      "requires_approval": true
+    }
+  ]
+}

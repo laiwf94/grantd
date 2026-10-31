@@ -1,0 +1,1 @@
+Deploy notes: the CI key is AKIAIOSFODNN7EXAMPLE (example value from the AWS documentation).

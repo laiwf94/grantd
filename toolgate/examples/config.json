@@ -1,0 +1,16 @@
+{
+  "tokens": {"issuer": "toolgate", "audience": "toolgate-demo", "max_ttl_seconds": 3600},
+  "agents": [
+    {"id": "alice-bot", "owner": "alice", "scopes": ["files:read"],
+     "token_sha256": "0c1e625940600a1a7d95cc5eb7384b9eb7b31dddb25353de0a3a0606093bc385",
+     "limits": {"agent_rps": 20, "agent_burst": 40, "tool_rps": 1, "tool_burst": 3, "daily_quota": 1000}},
+    {"id": "bob-bot", "owner": "bob",
+     "token_sha256": "9ab1a41b8a52aef417f9e835e47bc478137238bbabaaa39f0611275aacea3556"}
+  ],
+  "upstreams": [
+    {"name": "fake", "url": "http://127.0.0.1:19100/mcp", "credential_env": "FAKE_UPSTREAM_TOKEN",
+     "timeout_ms": 5000, "max_response_bytes": 1048576, "max_concurrency": 8, "tools_ttl_seconds": 1}
+  ],
+  "limits": {"agent_rps": 10, "agent_burst": 20, "tool_rps": 5, "tool_burst": 10, "daily_quota": 500},
+  "approvals": {"wait_seconds": 0, "pending_ttl_seconds": 600, "max_grant_ttl_seconds": 900}
+}
