@@ -1,4 +1,16 @@
-# grantd
+# authz
+
+One identity and access platform in Go: it signs people and agents in, decides what they may do, and governs what AI agents do with their tools. It brings three projects together in one repository and, during November 2026, one module and one binary:
+
+| Part | Started as | Today |
+|---|---|---|
+| Authorization | grantd | Zanzibar-style relationships, a schema language, consistent snapshots and a crash-safe write-ahead log (this directory) |
+| Sign-on | wicket | OIDC and SAML single sign-on in front of any app through nginx, Traefik or Envoy forward-auth ([wicket/](wicket/)) |
+| Agent gateway | toolgate | A security gateway for AI agent tool calls over MCP: default-deny policy, approvals, rate limits and a tamper-evident audit log ([toolgate/](toolgate/)) |
+
+All three keep their full history. The plan for the next year, three tracks in parallel, is in [ROADMAP.md](ROADMAP.md) and the issues labelled `roadmap`.
+
+## Authorization (formerly grantd)
 
 An authorization service in the style of Google's
 [Zanzibar](https://research.google/pubs/zanzibar-googles-consistent-global-authorization-system/):
