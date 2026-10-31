@@ -89,7 +89,8 @@ type Stats struct {
 }
 
 // Check reports whether the subject has the permission at revision rev.
-// sc must be the schema the request was validated against.
+// sc must be the schema the request was validated against. Check records no
+// trace; Explain answers the same question with one.
 func (e *Engine) Check(ctx context.Context, sc *schema.Schema, rev store.Revision, q Request) (bool, Stats, error) {
 	if err := q.Validate(sc); err != nil {
 		return false, Stats{}, err
@@ -118,6 +119,7 @@ type state struct {
 	memo   map[string]bool
 	active map[string]bool
 	stats  Stats
+	tr     *tracer // nil unless explaining
 }
 
 func (s *state) key(typ, id, rel string) string { return typ + ":" + id + "#" + rel }
@@ -137,16 +139,25 @@ func (s *state) check(typ, id, rel string, depth int) (ok, tainted bool, err err
 	}
 	// A userset always contains itself: group:eng#member "is" group:eng#member.
 	if typ == s.target.Type && id == s.target.ID && rel == s.target.Relation {
+		if s.tr != nil {
+			s.tr.leaf(TraceNode{Kind: KindSelf, Object: typ + ":" + id, Relation: rel, Result: true})
+		}
 		return true, false, nil
 	}
 	k := s.key(typ, id, rel)
 	if v, hit := s.memo[k]; hit {
+		if s.tr != nil {
+			s.tr.leaf(TraceNode{Kind: s.traceKind(typ, rel), Object: typ + ":" + id, Relation: rel, Result: v, Memo: true})
+		}
 		return v, false, nil
 	}
 	if s.active[k] {
+		if s.tr != nil {
+			s.tr.leaf(TraceNode{Kind: s.traceKind(typ, rel), Object: typ + ":" + id, Relation: rel, Cut: true, Tainted: true})
+		}
 		return false, true, nil
 	}
-	if s.e.cache != nil {
+	if s.e.cache != nil && s.tr == nil {
 		if v, hit := s.e.cache.Get(s.cacheKey(k)); hit {
 			s.stats.CacheHits++
 			s.memo[k] = v
@@ -162,6 +173,10 @@ func (s *state) check(typ, id, rel string, depth int) (ok, tainted bool, err err
 		return false, false, fmt.Errorf("%w %q", ErrUnknownType, typ)
 	}
 	s.active[k] = true
+	var node, parent *TraceNode
+	if s.tr != nil {
+		node, parent = s.tr.open(TraceNode{Kind: s.traceKind(typ, rel), Object: typ + ":" + id, Relation: rel})
+	}
 	switch {
 	case d.IsRelation(rel):
 		ok, tainted, err = s.direct(typ, id, rel, depth)
@@ -171,6 +186,9 @@ func (s *state) check(typ, id, rel string, depth int) (ok, tainted bool, err err
 		err = fmt.Errorf("%w: %q has no relation or permission %q", ErrUnknownName, typ, rel)
 	}
 	delete(s.active, k)
+	if s.tr != nil {
+		s.tr.close(node, parent, ok, tainted)
+	}
 	if err != nil {
 		return false, false, err
 	}
@@ -197,10 +215,11 @@ func (s *state) direct(typ, id, rel string, depth int) (bool, bool, error) {
 				continue
 			}
 		} else {
-			if r.SubjectID == "*" && s.target.Relation == "" {
-				return true, false, nil
-			}
-			if r.SubjectID == s.target.ID && r.SubjectRelation == s.target.Relation {
+			if (r.SubjectID == "*" && s.target.Relation == "") ||
+				(r.SubjectID == s.target.ID && r.SubjectRelation == s.target.Relation) {
+				if s.tr != nil {
+					s.tr.leaf(TraceNode{Kind: KindSubject, Object: typ + ":" + id, Relation: rel, Subject: subjectString(r), Result: true})
+				}
 				return true, false, nil
 			}
 		}
@@ -225,6 +244,13 @@ func (s *state) direct(typ, id, rel string, depth int) (bool, bool, error) {
 }
 
 func (s *state) expr(typ, id string, e schema.Expr, depth int) (bool, bool, error) {
+	if s.tr != nil {
+		return s.traceExpr(typ, id, e, depth)
+	}
+	return s.evalExpr(typ, id, e, depth)
+}
+
+func (s *state) evalExpr(typ, id string, e schema.Expr, depth int) (bool, bool, error) {
 	switch e := e.(type) {
 	case *schema.Ref:
 		return s.check(typ, id, e.Name, depth)
